@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
 
+/** Хранение в JSON-файле — без нативного SQLite (не ломается при смене версии Node на Windows). */
 export type EventRow = {
   id: string;
   week_monday: string;
@@ -14,51 +14,59 @@ export type EventRow = {
   reminder_sent: number;
 };
 
-let db: Database.Database | null = null;
+type FileStore = { events: EventRow[] };
 
-export function getDb(): Database.Database {
-  if (db) return db;
-  const dir = path.join(process.cwd(), "data");
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "planner.db");
-  db = new Database(file);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS events (
-      id TEXT PRIMARY KEY,
-      week_monday TEXT NOT NULL,
-      day_index INTEGER NOT NULL,
-      start_minutes INTEGER NOT NULL,
-      duration_minutes INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      owner_tg_id INTEGER NOT NULL,
-      remind_at TEXT,
-      reminder_sent INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_events_week ON events(week_monday);
-  `);
-  return db;
+const dataDir = path.join(process.cwd(), "data");
+const storePath = path.join(dataDir, "events.json");
+
+let mem: FileStore | null = null;
+
+function readDisk(): FileStore {
+  fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(storePath)) return { events: [] };
+  try {
+    const raw = fs.readFileSync(storePath, "utf-8");
+    const p = JSON.parse(raw) as FileStore;
+    if (!Array.isArray(p.events)) return { events: [] };
+    return p;
+  } catch {
+    return { events: [] };
+  }
+}
+
+function writeDisk(s: FileStore) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(storePath, JSON.stringify(s, null, 2), "utf-8");
+}
+
+function getStore(): FileStore {
+  if (!mem) mem = readDisk();
+  return mem;
+}
+
+/** Вызвать при старте сервера (создаёт папку data при необходимости). */
+export function initStore() {
+  getStore();
+}
+
+export function eventExists(id: string): boolean {
+  return getStore().events.some((e) => e.id === id);
 }
 
 export function listEventsForWeek(weekMonday: string): EventRow[] {
-  return getDb()
-    .prepare(
-      `SELECT id, week_monday, day_index, start_minutes, duration_minutes, title, owner_tg_id, remind_at, reminder_sent
-       FROM events WHERE week_monday = ? ORDER BY day_index, start_minutes`,
-    )
-    .all(weekMonday) as EventRow[];
+  return getStore()
+    .events.filter((e) => e.week_monday === weekMonday)
+    .sort((a, b) => a.day_index - b.day_index || a.start_minutes - b.start_minutes);
 }
 
 export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_sent?: number }) {
-  getDb()
-    .prepare(
-      `INSERT INTO events (id, week_monday, day_index, start_minutes, duration_minutes, title, owner_tg_id, remind_at, reminder_sent)
-       VALUES (@id, @week_monday, @day_index, @start_minutes, @duration_minutes, @title, @owner_tg_id, @remind_at, @reminder_sent)`,
-    )
-    .run({
-      ...row,
-      remind_at: row.remind_at ?? null,
-      reminder_sent: row.reminder_sent ?? 0,
-    });
+  const s = getStore();
+  s.events.push({
+    ...row,
+    remind_at: row.remind_at ?? null,
+    reminder_sent: row.reminder_sent ?? 0,
+  });
+  writeDisk(s);
 }
 
 export function updateEvent(
@@ -67,46 +75,26 @@ export function updateEvent(
     Pick<EventRow, "day_index" | "start_minutes" | "duration_minutes" | "title" | "remind_at" | "reminder_sent">
   >,
 ) {
-  const parts: string[] = [];
-  const params: Record<string, unknown> = { id };
-  if (patch.day_index !== undefined) {
-    parts.push("day_index = @day_index");
-    params.day_index = patch.day_index;
-  }
-  if (patch.start_minutes !== undefined) {
-    parts.push("start_minutes = @start_minutes");
-    params.start_minutes = patch.start_minutes;
-  }
-  if (patch.duration_minutes !== undefined) {
-    parts.push("duration_minutes = @duration_minutes");
-    params.duration_minutes = patch.duration_minutes;
-  }
-  if (patch.title !== undefined) {
-    parts.push("title = @title");
-    params.title = patch.title;
-  }
-  if (patch.remind_at !== undefined) {
-    parts.push("remind_at = @remind_at");
-    params.remind_at = patch.remind_at;
-  }
-  if (patch.reminder_sent !== undefined) {
-    parts.push("reminder_sent = @reminder_sent");
-    params.reminder_sent = patch.reminder_sent;
-  }
-  if (parts.length === 0) return;
-  getDb().prepare(`UPDATE events SET ${parts.join(", ")} WHERE id = @id`).run(params);
+  const s = getStore();
+  const ev = s.events.find((e) => e.id === id);
+  if (!ev) return;
+  if (patch.day_index !== undefined) ev.day_index = patch.day_index;
+  if (patch.start_minutes !== undefined) ev.start_minutes = patch.start_minutes;
+  if (patch.duration_minutes !== undefined) ev.duration_minutes = patch.duration_minutes;
+  if (patch.title !== undefined) ev.title = patch.title;
+  if (patch.remind_at !== undefined) ev.remind_at = patch.remind_at;
+  if (patch.reminder_sent !== undefined) ev.reminder_sent = patch.reminder_sent;
+  writeDisk(s);
 }
 
 export function deleteEvent(id: string) {
-  getDb().prepare(`DELETE FROM events WHERE id = ?`).run(id);
+  const s = getStore();
+  s.events = s.events.filter((e) => e.id !== id);
+  writeDisk(s);
 }
 
 export function dueReminders(nowIso: string): EventRow[] {
-  return getDb()
-    .prepare(
-      `SELECT id, week_monday, day_index, start_minutes, duration_minutes, title, owner_tg_id, remind_at, reminder_sent
-       FROM events
-       WHERE reminder_sent = 0 AND remind_at IS NOT NULL AND remind_at <= ?`,
-    )
-    .all(nowIso) as EventRow[];
+  return getStore().events.filter(
+    (e) => e.reminder_sent === 0 && e.remind_at != null && e.remind_at !== "" && e.remind_at <= nowIso,
+  );
 }

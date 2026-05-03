@@ -3,7 +3,7 @@ import fs from "node:fs";
 import express from "express";
 import cors from "cors";
 import cron from "node-cron";
-import { Telegraf } from "telegraf";
+import { Telegraf, type Context } from "telegraf";
 import { randomUUID } from "node:crypto";
 import dotenv from "dotenv";
 import { parseAndValidateInitData } from "./auth.js";
@@ -135,8 +135,7 @@ app.patch("/api/events/:id", (req, res) => {
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  const exists = db.getDb().prepare(`SELECT 1 FROM events WHERE id = ?`).get(id);
-  if (!exists) return res.status(404).json({ error: "not_found" });
+  if (!db.eventExists(id)) return res.status(404).json({ error: "not_found" });
 
   const b = req.body as Partial<{
     day_index: number;
@@ -169,8 +168,7 @@ app.delete("/api/events/:id", (req, res) => {
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  const exists = db.getDb().prepare(`SELECT 1 FROM events WHERE id = ?`).get(id);
-  if (!exists) return res.status(404).json({ error: "not_found" });
+  if (!db.eventExists(id)) return res.status(404).json({ error: "not_found" });
   db.deleteEvent(id);
   return res.json({ ok: true });
 });
@@ -201,7 +199,7 @@ async function sendReminders(bot: Telegraf) {
 }
 
 async function main() {
-  db.getDb();
+  db.initStore();
 
   if (!BOT_TOKEN) {
     console.error("Укажи BOT_TOKEN в .env");
@@ -210,13 +208,20 @@ async function main() {
 
   const bot = new Telegraf(BOT_TOKEN);
 
-  bot.command("myid", async (ctx) => {
+  bot.catch((err, ctx) => {
+    console.error("Ошибка в боте:", err);
+    void ctx?.reply("Внутренняя ошибка. Посмотри чёрное окно терминала на ПК.").catch(() => {});
+  });
+
+  const replyMyId = async (ctx: Context) => {
     const id = ctx.from?.id;
     if (!id) return;
     await ctx.reply(
-      `Твой Telegram ID (только цифры): ${id}\n\nЕго нужно вписать в TELEGRAM_ALLOWED_IDS на сервере. Номер телефона или @ник сюда не подходят — пусть жена тоже напишет боту /myid со своего Telegram.`,
+      `Твой Telegram ID (только цифры): ${id}\n\nВпиши его в TELEGRAM_ALLOWED_IDS в файле .env на ПК (два id через запятую). Жена пусть тоже напишет этому боту /myid.`,
     );
-  });
+  };
+
+  bot.command("myid", replyMyId);
 
   bot.start(async (ctx) => {
     const id = ctx.from?.id;
@@ -241,12 +246,16 @@ async function main() {
   const webhookBase = (process.env.WEBHOOK_BASE_URL ?? "").replace(/\/$/, "");
 
   if (webhookBase) {
+    console.warn(
+      "В .env задан WEBHOOK_BASE_URL — Telegram шлёт сообщения туда, а не на твой ПК. Для проверки дома убери WEBHOOK_BASE_URL и перезапусти.",
+    );
     app.use(bot.webhookCallback(webhookPath));
     await bot.telegram.setWebhook(`${webhookBase}${webhookPath}`);
     console.log("Webhook:", `${webhookBase}${webhookPath}`);
   } else {
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    void bot.launch().then(() => console.log("Бот: long polling"));
+    await bot.launch();
+    console.log("Бот на связи. В Telegram открой СВОЕГО бота (не @BotFather) и напиши /myid");
   }
 
   cron.schedule("* * * * *", () => {
