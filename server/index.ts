@@ -210,6 +210,14 @@ async function main() {
 
   const bot = new Telegraf(BOT_TOKEN);
 
+  bot.command("myid", async (ctx) => {
+    const id = ctx.from?.id;
+    if (!id) return;
+    await ctx.reply(
+      `Твой Telegram ID (только цифры): ${id}\n\nЕго нужно вписать в TELEGRAM_ALLOWED_IDS на сервере. Номер телефона или @ник сюда не подходят — пусть жена тоже напишет боту /myid со своего Telegram.`,
+    );
+  });
+
   bot.start(async (ctx) => {
     const id = ctx.from?.id;
     if (id && ALLOWED.size && !ALLOWED.has(id)) {
