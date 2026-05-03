@@ -13,12 +13,14 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
     "node-cron": "^3.0.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "telegraf": "^4.16.3"
+    "telegraf": "^4.16.3",
+    "tsx": "^4.19.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
@@ -29,8 +31,6 @@
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^9.1.2",
-    "cross-env": "^7.0.3",
-    "tsx": "^4.19.4",
     "typescript": "~5.8.3",
     "vite": "^6.3.4"
   }
