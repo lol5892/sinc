@@ -24,6 +24,21 @@ const ALLOWED = new Set(
     .filter((n) => Number.isFinite(n)),
 );
 
+/** Для отправки сообщений из HTTP (новое дело и т.д.). */
+let botForNotify: Telegraf | null = null;
+
+async function notifyOthersInFamily(creatorId: number, text: string) {
+  if (!botForNotify || ALLOWED.size < 2) return;
+  for (const uid of ALLOWED) {
+    if (uid === creatorId) continue;
+    try {
+      await botForNotify.telegram.sendMessage(uid, text);
+    } catch (e) {
+      console.error("Уведомление не дошло до", uid, e);
+    }
+  }
+}
+
 function assertAllowed(userId: number) {
   if (ALLOWED.size === 0) {
     console.warn("TELEGRAM_ALLOWED_IDS пуст — доступ к API закрыт.");
@@ -111,6 +126,7 @@ app.post("/api/events", (req, res) => {
   if (typeof b.duration_minutes !== "number" || b.duration_minutes < 15 || b.duration_minutes > 24 * 60)
     return res.status(400).json({ error: "duration_minutes" });
   if (typeof b.title !== "string" || !b.title.trim()) return res.status(400).json({ error: "title" });
+  const titleTrim = b.title.trim().slice(0, 500);
   const id = randomUUID();
   db.insertEvent({
     id,
@@ -118,10 +134,15 @@ app.post("/api/events", (req, res) => {
     day_index: b.day_index,
     start_minutes: b.start_minutes,
     duration_minutes: b.duration_minutes,
-    title: b.title.trim().slice(0, 500),
+    title: titleTrim,
     owner_tg_id: userId,
     remind_at: b.remind_at && b.remind_at.length > 0 ? b.remind_at : null,
   });
+  const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const hh = String(Math.floor(b.start_minutes / 60)).padStart(2, "0");
+  const mm = String(b.start_minutes % 60).padStart(2, "0");
+  const msg = `Новое дело в общем плане:\n«${titleTrim}»\n${WD[b.day_index]}, ${hh}:${mm}`;
+  void notifyOthersInFamily(userId, msg);
   return res.json({ id });
 });
 
@@ -207,6 +228,7 @@ async function main() {
   }
 
   const bot = new Telegraf(BOT_TOKEN);
+  botForNotify = bot;
 
   bot.catch((err, ctx) => {
     console.error("Ошибка в боте:", err);
@@ -232,7 +254,7 @@ async function main() {
     if (WEB_APP_URL) {
       await ctx.reply("План недели — открой мини-приложение:", {
         reply_markup: {
-          inline_keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
+          inline_keyboard: [[{ text: "Открыть планер", web_app: { url: WEB_APP_URL } }]],
         },
       });
     } else {
