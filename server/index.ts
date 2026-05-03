@@ -222,72 +222,89 @@ async function sendReminders(bot: Telegraf) {
 async function main() {
   db.initStore();
 
-  if (!BOT_TOKEN) {
-    console.error("Укажи BOT_TOKEN в .env");
-    process.exit(1);
-  }
+  let bot: Telegraf | null = null;
+  if (BOT_TOKEN) {
+    bot = new Telegraf(BOT_TOKEN);
+    botForNotify = bot;
 
-  const bot = new Telegraf(BOT_TOKEN);
-  botForNotify = bot;
+    bot.catch((err, ctx) => {
+      console.error("Ошибка в боте:", err);
+      void ctx?.reply("Внутренняя ошибка. Посмотри логи на сервере.").catch(() => {});
+    });
 
-  bot.catch((err, ctx) => {
-    console.error("Ошибка в боте:", err);
-    void ctx?.reply("Внутренняя ошибка. Посмотри чёрное окно терминала на ПК.").catch(() => {});
-  });
-
-  const replyMyId = async (ctx: Context) => {
-    const id = ctx.from?.id;
-    if (!id) return;
-    await ctx.reply(
-      `Твой Telegram ID (только цифры): ${id}\n\nВпиши его в TELEGRAM_ALLOWED_IDS в файле .env на ПК (два id через запятую). Жена пусть тоже напишет этому боту /myid.`,
-    );
-  };
-
-  bot.command("myid", replyMyId);
-
-  bot.start(async (ctx) => {
-    const id = ctx.from?.id;
-    if (id && ALLOWED.size && !ALLOWED.has(id)) {
-      await ctx.reply("Этот бот только для семьи. Добавь свой Telegram ID в TELEGRAM_ALLOWED_IDS на сервере.");
-      return;
-    }
-    if (WEB_APP_URL) {
-      await ctx.reply("План недели — открой мини-приложение:", {
-        reply_markup: {
-          inline_keyboard: [[{ text: "Открыть планер", web_app: { url: WEB_APP_URL } }]],
-        },
-      });
-    } else {
+    const replyMyId = async (ctx: Context) => {
+      const id = ctx.from?.id;
+      if (!id) return;
       await ctx.reply(
-        "Задай на сервере переменную WEB_APP_URL — публичный https-адрес, где открывается это приложение (Mini App).",
+        `Твой Telegram ID (только цифры): ${id}\n\nВпиши его в TELEGRAM_ALLOWED_IDS в файле .env на ПК (два id через запятую). Жена пусть тоже напишет этому боту /myid.`,
       );
-    }
-  });
+    };
+
+    bot.command("myid", replyMyId);
+
+    bot.start(async (ctx) => {
+      const id = ctx.from?.id;
+      if (id && ALLOWED.size && !ALLOWED.has(id)) {
+        await ctx.reply("Этот бот только для семьи. Добавь свой Telegram ID в TELEGRAM_ALLOWED_IDS на сервере.");
+        return;
+      }
+      if (WEB_APP_URL) {
+        await ctx.reply("План недели — открой мини-приложение:", {
+          reply_markup: {
+            inline_keyboard: [[{ text: "Открыть планер", web_app: { url: WEB_APP_URL } }]],
+          },
+        });
+      } else {
+        await ctx.reply(
+          "Задай на сервере переменную WEB_APP_URL — публичный https-адрес, где открывается это приложение (Mini App).",
+        );
+      }
+    });
+  } else {
+    botForNotify = null;
+    console.error(
+      "BOT_TOKEN не задан. На Railway: Variables → BOT_TOKEN → Redeploy. Пока бот не работает, сайт может открываться.",
+    );
+  }
 
   const webhookPath = process.env.WEBHOOK_PATH || "/telegram/webhook";
   const webhookBase = (process.env.WEBHOOK_BASE_URL ?? "").replace(/\/$/, "");
 
   cron.schedule("* * * * *", () => {
-    void sendReminders(bot);
+    if (bot) void sendReminders(bot);
   });
 
-  // Сначала поднимаем HTTP — иначе при «зависании» Telegram сайт на :5173 ломается (ECONNREFUSED :3001).
+  // Сначала HTTP — иначе при ошибке Telegram порт не откроется.
   app.listen(PORT, () => {
-    console.log(`API + статика: http://localhost:${PORT}`);
+    console.log(`API + статика: порт ${PORT}`);
     if (NODE_ENV === "development") {
       console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
     }
   });
+
+  if (!bot) {
+    process.once("SIGINT", () => process.exit(0));
+    process.once("SIGTERM", () => process.exit(0));
+    return;
+  }
 
   if (webhookBase) {
     console.warn(
       "В .env задан WEBHOOK_BASE_URL — Telegram шлёт сообщения туда, а не на твой ПК. Для проверки дома убери WEBHOOK_BASE_URL и перезапусти.",
     );
     app.use(bot.webhookCallback(webhookPath));
-    await bot.telegram.setWebhook(`${webhookBase}${webhookPath}`);
-    console.log("Webhook:", `${webhookBase}${webhookPath}`);
+    try {
+      await bot.telegram.setWebhook(`${webhookBase}${webhookPath}`);
+      console.log("Webhook:", `${webhookBase}${webhookPath}`);
+    } catch (e) {
+      console.error("setWebhook не удался:", e);
+    }
   } else {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    try {
+      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+    } catch (e) {
+      console.error("deleteWebhook не удался (проверь BOT_TOKEN):", e);
+    }
     void bot
       .launch()
       .then(() =>
@@ -296,8 +313,8 @@ async function main() {
       .catch((e) => console.error("Бот не подключился к Telegram (интернет/токен):", e));
   }
 
-  process.once("SIGINT", () => bot.stop("SIGINT"));
-  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  process.once("SIGINT", () => bot!.stop("SIGINT"));
+  process.once("SIGTERM", () => bot!.stop("SIGTERM"));
 }
 
 main().catch((e) => {

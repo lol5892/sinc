@@ -15,6 +15,14 @@
    - Build: `npm run build`
    - Start: `npm run start`
 
+## Если деплой «CRASHED»
+
+Чаще всего в **Variables** на Railway **не добавлен `BOT_TOKEN`** (или неверный токен). Раньше контейнер сразу падал; в новых версиях кода сервер может подняться без бота — смотри **Deploy Logs**.
+
+Обязательно добавь: **`BOT_TOKEN`**, **`TELEGRAM_ALLOWED_IDS`**, **`NODE_ENV`** = `production`.
+
+---
+
 ## 3. Переменные (Variables)
 
 В сервисе открой **Variables** и добавь:
