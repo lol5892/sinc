@@ -5,6 +5,7 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+*.tsbuildinfo
 
 # Logs
 npm-debug.log*
