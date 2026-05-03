@@ -245,6 +245,18 @@ async function main() {
   const webhookPath = process.env.WEBHOOK_PATH || "/telegram/webhook";
   const webhookBase = (process.env.WEBHOOK_BASE_URL ?? "").replace(/\/$/, "");
 
+  cron.schedule("* * * * *", () => {
+    void sendReminders(bot);
+  });
+
+  // Сначала поднимаем HTTP — иначе при «зависании» Telegram сайт на :5173 ломается (ECONNREFUSED :3001).
+  app.listen(PORT, () => {
+    console.log(`API + статика: http://localhost:${PORT}`);
+    if (NODE_ENV === "development") {
+      console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
+    }
+  });
+
   if (webhookBase) {
     console.warn(
       "В .env задан WEBHOOK_BASE_URL — Telegram шлёт сообщения туда, а не на твой ПК. Для проверки дома убери WEBHOOK_BASE_URL и перезапусти.",
@@ -254,20 +266,13 @@ async function main() {
     console.log("Webhook:", `${webhookBase}${webhookPath}`);
   } else {
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    await bot.launch();
-    console.log("Бот на связи. В Telegram открой СВОЕГО бота (не @BotFather) и напиши /myid");
+    void bot
+      .launch()
+      .then(() =>
+        console.log("Бот на связи. В Telegram открой СВОЕГО бота (не @BotFather) и напиши /myid"),
+      )
+      .catch((e) => console.error("Бот не подключился к Telegram (интернет/токен):", e));
   }
-
-  cron.schedule("* * * * *", () => {
-    void sendReminders(bot);
-  });
-
-  app.listen(PORT, () => {
-    console.log(`API + статика: http://localhost:${PORT}`);
-    if (NODE_ENV === "development") {
-      console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
-    }
-  });
 
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
