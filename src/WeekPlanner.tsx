@@ -8,6 +8,7 @@ const HOUR_H = 44;
 const DAY_H = 24 * HOUR_H;
 const TIME_W = 46;
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const DEFAULT_DURATION = 60;
 
 function mondayISO(d: Date): string {
   const x = new Date(d);
@@ -32,6 +33,25 @@ function fmtClock(m: number): string {
   const h = Math.floor(m / 60);
   const mm = m % 60;
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+function fmtDuration(m: number): string {
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  if (h === 0) return `${mm} мин`;
+  if (mm === 0) return `${h} ч`;
+  return `${h} ч ${mm} мин`;
+}
+
+function parseClock(value: string): number | null {
+  const [hh, mm] = value.split(":").map(Number);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function durationOptions(current: number): number[] {
+  return Array.from(new Set([15, 30, 45, 60, 90, 120, 180, 240, current])).sort((a, b) => a - b);
 }
 
 function isoToDatetimeLocal(iso: string | null): string {
@@ -261,11 +281,12 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   >(null);
 
   const openCreateAt = (day_index: number, start_minutes: number) => {
+    const start = Math.min(24 * 60 - SNAP, Math.max(0, snapMin(start_minutes)));
     setEditor({
       mode: "create",
       day_index,
-      start_minutes: snapMin(start_minutes),
-      duration_minutes: 60,
+      start_minutes: start,
+      duration_minutes: Math.min(DEFAULT_DURATION, 24 * 60 - start),
       title: "",
       remind_at: "",
     });
@@ -281,6 +302,12 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
 
   const saveEditor = async () => {
     if (!editor) return;
+    const title = editor.title.trim();
+    if (!title) {
+      setErr("Напиши название дела.");
+      return;
+    }
+    const safeDuration = Math.min(Math.max(SNAP, editor.duration_minutes), 24 * 60 - editor.start_minutes);
     try {
       if (editor.mode === "create") {
         await api.createEvent(
@@ -288,8 +315,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
             week_monday: monday,
             day_index: editor.day_index,
             start_minutes: editor.start_minutes,
-            duration_minutes: editor.duration_minutes,
-            title: editor.title,
+            duration_minutes: safeDuration,
+            title,
             remind_at: editor.remind_at ? new Date(editor.remind_at).toISOString() : null,
           },
           initData,
@@ -301,8 +328,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
           {
             day_index: editor.day_index,
             start_minutes: editor.start_minutes,
-            duration_minutes: editor.duration_minutes,
-            title: editor.title,
+            duration_minutes: safeDuration,
+            title,
             remind_at: editor.remind_at ? new Date(editor.remind_at).toISOString() : null,
           },
           initData,
@@ -331,10 +358,10 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     <div className="wp">
       <header className="wp-head">
         <div className="wp-brand">
-          <span className="wp-logo">◇</span>
+          <span className="wp-logo">+</span>
           <div>
-            <div className="wp-title">Неделя вдвоём</div>
-            <div className="wp-sub">Перетаскивай блоки, тяни низ за длительность</div>
+            <div className="wp-title">План недели вдвоём</div>
+            <div className="wp-sub">Нажми плюс в клетке, задай дело и время вручную</div>
           </div>
         </div>
         <div className="wp-nav">
@@ -384,7 +411,19 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
               onPointerDown={(e) => onBackgroundPointer(e, day)}
             >
               {Array.from({ length: 24 }, (_, h) => (
-                <div key={h} className="wp-slotline" style={{ top: h * HOUR_H }} />
+                <button
+                  key={h}
+                  type="button"
+                  className="wp-add-slot"
+                  style={{ top: h * HOUR_H, height: HOUR_H }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openCreateAt(day, h * 60);
+                  }}
+                  aria-label={`Добавить дело: ${WD[day]} ${fmtClock(h * 60)}`}
+                >
+                  <span className="wp-add-plus">+</span>
+                </button>
               ))}
               {(eventsByDay.get(day) ?? []).map((ev) => {
                 const e = displayEvent(ev);
@@ -413,7 +452,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                   >
                     <div className="wp-block-title">{e.title}</div>
                     <div className="wp-block-meta">
-                      {fmtClock(e.start_minutes)} · {Math.round(e.duration_minutes / 60)}ч
+                      {fmtClock(e.start_minutes)} - {fmtClock(e.start_minutes + e.duration_minutes)} · {fmtDuration(e.duration_minutes)}
                     </div>
                     <div
                       className="resize-handle"
@@ -431,9 +470,12 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
         <div className="wp-modal-root" role="dialog" aria-modal>
           <div className="wp-modal">
             <h2>{editor.mode === "create" ? "Новое дело" : "Редактировать"}</h2>
+            <p className="wp-modal-hint">
+              Клетка уже выбрала день и примерное время. Здесь можно поправить всё руками.
+            </p>
             <label className="wp-field">
-              Текст
-              <input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} placeholder="Например: ужин с родителями" />
+              Название дела
+              <input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} placeholder="Например: ужин с родителями" autoFocus />
             </label>
             <div className="wp-row2">
               <label className="wp-field">
@@ -453,24 +495,41 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                   step={900}
                   value={fmtClock(editor.start_minutes)}
                   onChange={(e) => {
-                    const [hh, mm] = e.target.value.split(":").map(Number);
-                    setEditor({ ...editor, start_minutes: hh * 60 + mm });
+                    const minutes = parseClock(e.target.value);
+                    if (minutes == null) return;
+                    setEditor({
+                      ...editor,
+                      start_minutes: minutes,
+                      duration_minutes: Math.min(editor.duration_minutes, 24 * 60 - minutes),
+                    });
                   }}
                 />
               </label>
             </div>
-            <label className="wp-field">
-              Длительность (ч)
-              <input
-                type="number"
-                min={0.25}
-                step={0.25}
-                value={editor.duration_minutes / 60}
-                onChange={(e) =>
-                  setEditor({ ...editor, duration_minutes: Math.max(SNAP, Math.round(Number(e.target.value) * 60 / SNAP) * SNAP) })
-                }
-              />
-            </label>
+            <div className="wp-row2">
+              <label className="wp-field">
+                Длительность
+                <select
+                  value={editor.duration_minutes}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      duration_minutes: Math.min(Number(e.target.value), 24 * 60 - editor.start_minutes),
+                    })
+                  }
+                >
+                  {durationOptions(editor.duration_minutes).map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      {fmtDuration(minutes)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="wp-field">
+                До
+                <div className="wp-readonly-time">{fmtClock(editor.start_minutes + editor.duration_minutes)}</div>
+              </label>
+            </div>
             <label className="wp-field">
               Напоминание (необязательно)
               <input
@@ -479,6 +538,9 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                 onChange={(e) => setEditor({ ...editor, remind_at: e.target.value })}
               />
             </label>
+            <div className="wp-summary">
+              {WD[editor.day_index]}, {fmtClock(editor.start_minutes)} - {fmtClock(editor.start_minutes + editor.duration_minutes)}
+            </div>
             <div className="wp-actions">
               {editor.mode === "edit" && (
                 <button type="button" className="wp-btn danger" onClick={() => void deleteEditor()}>

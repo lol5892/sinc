@@ -12,7 +12,6 @@ import * as db from "./db.js";
 dotenv.config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
-const WEB_APP_URL = (process.env.WEB_APP_URL ?? "").replace(/\/$/, "");
 const PORT = Number(process.env.PORT ?? 3001);
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const ALLOWED = new Set(
@@ -23,6 +22,31 @@ const ALLOWED = new Set(
     .map(Number)
     .filter((n) => Number.isFinite(n)),
 );
+
+function normalizePublicUrl(value: string | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) return "";
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return withScheme.replace(/\/$/, "");
+}
+
+function detectWebAppUrl(): string {
+  const direct = normalizePublicUrl(process.env.WEB_APP_URL);
+  if (direct) return direct;
+
+  const platformUrl =
+    normalizePublicUrl(process.env.RAILWAY_PUBLIC_DOMAIN) ||
+    normalizePublicUrl(process.env.RAILWAY_STATIC_URL) ||
+    normalizePublicUrl(process.env.RENDER_EXTERNAL_URL) ||
+    normalizePublicUrl(process.env.PUBLIC_URL) ||
+    normalizePublicUrl(process.env.APP_URL);
+  if (platformUrl) return platformUrl;
+
+  const flyApp = process.env.FLY_APP_NAME?.trim();
+  return flyApp ? `https://${flyApp}.fly.dev` : "";
+}
+
+const WEB_APP_URL = detectWebAppUrl();
 
 /** Для отправки сообщений из HTTP (новое дело и т.д.). */
 let botForNotify: Telegraf | null = null;
@@ -85,7 +109,18 @@ if (fs.existsSync(distDir)) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+  const missing: string[] = [];
+  if (!BOT_TOKEN) missing.push("BOT_TOKEN");
+  if (ALLOWED.size === 0) missing.push("TELEGRAM_ALLOWED_IDS");
+  if (!WEB_APP_URL) missing.push("WEB_APP_URL");
+
+  res.json({
+    ok: true,
+    bot_configured: Boolean(BOT_TOKEN),
+    allowed_users: ALLOWED.size,
+    mini_app_url: WEB_APP_URL || null,
+    missing,
+  });
 });
 
 app.get("/api/week", (req, res) => {
@@ -222,9 +257,25 @@ async function sendReminders(bot: Telegraf) {
 async function main() {
   db.initStore();
 
+  console.log(WEB_APP_URL ? `Mini App URL: ${WEB_APP_URL}` : "Mini App URL не задан");
+  if (ALLOWED.size === 0) {
+    console.warn("TELEGRAM_ALLOWED_IDS пуст — добавь два Telegram ID через запятую.");
+  }
+
+  // HTTP запускаем всегда: так Railway не падает целиком из-за отсутствующей переменной бота,
+  // а /api/health показывает, что именно нужно добавить в Variables.
+  const server = app.listen(PORT, () => {
+    console.log(`API + статика: http://localhost:${PORT}`);
+    if (NODE_ENV === "development") {
+      console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
+    }
+  });
+
   if (!BOT_TOKEN) {
-    console.error("Укажи BOT_TOKEN в .env");
-    process.exit(1);
+    console.error("BOT_TOKEN не задан — сайт запущен, но Telegram-бот выключен. Добавь BOT_TOKEN в Railway Variables и передеплой.");
+    process.once("SIGINT", () => server.close());
+    process.once("SIGTERM", () => server.close());
+    return;
   }
 
   const bot = new Telegraf(BOT_TOKEN);
@@ -245,24 +296,70 @@ async function main() {
 
   bot.command("myid", replyMyId);
 
-  bot.start(async (ctx) => {
+  const checkFamilyAccess = async (ctx: Context): Promise<boolean> => {
     const id = ctx.from?.id;
     if (id && ALLOWED.size && !ALLOWED.has(id)) {
       await ctx.reply("Этот бот только для семьи. Добавь свой Telegram ID в TELEGRAM_ALLOWED_IDS на сервере.");
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const planIntro =
+    "Привет! Это общий семейный план недели.\n\n" +
+    "Как пользоваться:\n" +
+    "1. Нажми кнопку «Открыть план недели» под полем ввода.\n" +
+    "2. В мини-приложении нажми плюс в нужной клетке недели.\n" +
+    "3. Впиши дело, день, время, длительность и при желании напоминание.\n\n" +
+    "Когда ты добавишь дело, жена получит уведомление в этом боте. Она может открыть этот же план и увидеть все дела.";
+
+  const replyWithPlannerButton = async (ctx: Context) => {
+    if (!(await checkFamilyAccess(ctx))) return;
+
     if (WEB_APP_URL) {
-      await ctx.reply("План недели — открой мини-приложение:", {
+      await ctx.reply(planIntro, {
         reply_markup: {
-          inline_keyboard: [[{ text: "Открыть планер", web_app: { url: WEB_APP_URL } }]],
+          keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
+          resize_keyboard: true,
+          is_persistent: true,
+        },
+      });
+      await ctx.reply("Если кнопка снизу не видна, открой план этой кнопкой:", {
+        reply_markup: {
+          inline_keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
         },
       });
     } else {
       await ctx.reply(
-        "Задай на сервере переменную WEB_APP_URL — публичный https-адрес, где открывается это приложение (Mini App).",
+        `${planIntro}\n\nСейчас WEB_APP_URL пустой. Для кнопки Mini App нужен публичный https-адрес приложения. Пока можно проверять план в браузере через VITE_DEV_USER_ID.`,
       );
     }
-  });
+  };
+
+  bot.command("plan", replyWithPlannerButton);
+
+  bot.start(replyWithPlannerButton);
+  bot.hears(/^\/?start$/i, replyWithPlannerButton);
+  bot.hears(/^открыть план недели$/i, replyWithPlannerButton);
+
+  if (WEB_APP_URL) {
+    try {
+      await bot.telegram.setMyCommands([
+        { command: "start", description: "Показать кнопку планера" },
+        { command: "plan", description: "Открыть общий план недели" },
+        { command: "myid", description: "Показать мой Telegram ID" },
+      ]);
+      await bot.telegram.callApi("setChatMenuButton", {
+        menu_button: {
+          type: "web_app",
+          text: "План недели",
+          web_app: { url: WEB_APP_URL },
+        },
+      });
+    } catch (e) {
+      console.error("Не удалось поставить кнопку Mini App в меню Telegram:", e);
+    }
+  }
 
   const webhookPath = process.env.WEBHOOK_PATH || "/telegram/webhook";
   const webhookBase = (process.env.WEBHOOK_BASE_URL ?? "").replace(/\/$/, "");
@@ -271,33 +368,39 @@ async function main() {
     void sendReminders(bot);
   });
 
-  // Сначала поднимаем HTTP — иначе при «зависании» Telegram сайт на :5173 ломается (ECONNREFUSED :3001).
-  app.listen(PORT, () => {
-    console.log(`API + статика: http://localhost:${PORT}`);
-    if (NODE_ENV === "development") {
-      console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
-    }
-  });
-
   if (webhookBase) {
     console.warn(
       "В .env задан WEBHOOK_BASE_URL — Telegram шлёт сообщения туда, а не на твой ПК. Для проверки дома убери WEBHOOK_BASE_URL и перезапусти.",
     );
     app.use(bot.webhookCallback(webhookPath));
-    await bot.telegram.setWebhook(`${webhookBase}${webhookPath}`);
-    console.log("Webhook:", `${webhookBase}${webhookPath}`);
+    try {
+      await bot.telegram.setWebhook(`${webhookBase}${webhookPath}`);
+      console.log("Webhook:", `${webhookBase}${webhookPath}`);
+    } catch (e) {
+      console.error("Webhook не включился — сайт работает, но бот может не получать сообщения:", e);
+    }
   } else {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    void bot
-      .launch()
-      .then(() =>
-        console.log("Бот на связи. В Telegram открой СВОЕГО бота (не @BotFather) и напиши /myid"),
-      )
-      .catch((e) => console.error("Бот не подключился к Telegram (интернет/токен):", e));
+    try {
+      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+      void bot
+        .launch()
+        .then(() =>
+          console.log("Бот на связи. В Telegram открой СВОЕГО бота (не @BotFather) и напиши /myid"),
+        )
+        .catch((e) => console.error("Бот не подключился к Telegram (интернет/токен):", e));
+    } catch (e) {
+      console.error("Бот не подключился к Telegram (интернет/токен) — сайт продолжает работать:", e);
+    }
   }
 
-  process.once("SIGINT", () => bot.stop("SIGINT"));
-  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  process.once("SIGINT", () => {
+    bot.stop("SIGINT");
+    server.close();
+  });
+  process.once("SIGTERM", () => {
+    bot.stop("SIGTERM");
+    server.close();
+  });
 }
 
 main().catch((e) => {

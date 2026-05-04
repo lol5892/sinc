@@ -167,14 +167,40 @@
   touch-action: none;
 }
 
-.wp-slotline {
+.wp-add-slot {
   position: absolute;
   left: 0;
   right: 0;
-  height: 1px;
-  background: var(--wp-line);
-  opacity: 0.55;
-  pointer-events: none;
+  border: 0;
+  border-top: 1px solid var(--wp-line);
+  background: transparent;
+  color: var(--wp-muted);
+  cursor: pointer;
+  opacity: 0.62;
+  touch-action: manipulation;
+}
+
+.wp-add-slot:hover,
+.wp-add-slot:focus-visible {
+  outline: none;
+  opacity: 1;
+  background: color-mix(in srgb, var(--wp-accent) 10%, transparent);
+}
+
+.wp-add-plus {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--wp-accent) 38%, var(--wp-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wp-panel) 88%, transparent);
+  color: var(--wp-accent);
+  font-size: 0.78rem;
+  line-height: 1;
 }
 
 .wp-block {
@@ -192,6 +218,7 @@
   backdrop-filter: blur(8px);
   overflow: hidden;
   touch-action: none;
+  z-index: 1;
 }
 
 .wp-block:active {
@@ -264,6 +291,13 @@
   font-size: 1.05rem;
 }
 
+.wp-modal-hint {
+  margin: -0.35rem 0 0.85rem;
+  color: var(--wp-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .wp-field {
   display: flex;
   flex-direction: column;
@@ -274,13 +308,19 @@
 }
 
 .wp-field input,
-.wp-field select {
+.wp-field select,
+.wp-readonly-time {
   font: inherit;
   padding: 0.45rem 0.55rem;
   border-radius: 0.5rem;
   border: 1px solid var(--wp-line);
   background: var(--wp-bg);
   color: var(--wp-fg);
+}
+
+.wp-readonly-time {
+  min-height: 2.15rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .wp-row2 {
@@ -295,4 +335,30 @@
   gap: 0.45rem;
   justify-content: flex-end;
   margin-top: 0.5rem;
+}
+
+.wp-summary {
+  margin: 0.2rem 0 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--wp-accent) 30%, var(--wp-line));
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--wp-accent) 8%, transparent);
+  color: var(--wp-fg);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 520px) {
+  .wp-head {
+    align-items: flex-start;
+  }
+
+  .wp-nav {
+    width: 100%;
+  }
+
+  .wp-range {
+    flex: 1;
+    text-align: center;
+  }
 }
