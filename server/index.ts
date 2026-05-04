@@ -109,7 +109,18 @@ if (fs.existsSync(distDir)) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+  const missing: string[] = [];
+  if (!BOT_TOKEN) missing.push("BOT_TOKEN");
+  if (ALLOWED.size === 0) missing.push("TELEGRAM_ALLOWED_IDS");
+  if (!WEB_APP_URL) missing.push("WEB_APP_URL");
+
+  res.json({
+    ok: true,
+    bot_configured: Boolean(BOT_TOKEN),
+    allowed_users: ALLOWED.size,
+    mini_app_url: WEB_APP_URL || null,
+    missing,
+  });
 });
 
 app.get("/api/week", (req, res) => {
@@ -246,11 +257,26 @@ async function sendReminders(bot: Telegraf) {
 async function main() {
   db.initStore();
 
-  if (!BOT_TOKEN) {
-    console.error("Укажи BOT_TOKEN в .env");
-    process.exit(1);
-  }
   console.log(WEB_APP_URL ? `Mini App URL: ${WEB_APP_URL}` : "Mini App URL не задан");
+  if (ALLOWED.size === 0) {
+    console.warn("TELEGRAM_ALLOWED_IDS пуст — добавь два Telegram ID через запятую.");
+  }
+
+  // HTTP запускаем всегда: так Railway не падает целиком из-за отсутствующей переменной бота,
+  // а /api/health показывает, что именно нужно добавить в Variables.
+  const server = app.listen(PORT, () => {
+    console.log(`API + статика: http://localhost:${PORT}`);
+    if (NODE_ENV === "development") {
+      console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
+    }
+  });
+
+  if (!BOT_TOKEN) {
+    console.error("BOT_TOKEN не задан — сайт запущен, но Telegram-бот выключен. Добавь BOT_TOKEN в Railway Variables и передеплой.");
+    process.once("SIGINT", () => server.close());
+    process.once("SIGTERM", () => server.close());
+    return;
+  }
 
   const bot = new Telegraf(BOT_TOKEN);
   botForNotify = bot;
@@ -342,33 +368,39 @@ async function main() {
     void sendReminders(bot);
   });
 
-  // Сначала поднимаем HTTP — иначе при «зависании» Telegram сайт на :5173 ломается (ECONNREFUSED :3001).
-  app.listen(PORT, () => {
-    console.log(`API + статика: http://localhost:${PORT}`);
-    if (NODE_ENV === "development") {
-      console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
-    }
-  });
-
   if (webhookBase) {
     console.warn(
       "В .env задан WEBHOOK_BASE_URL — Telegram шлёт сообщения туда, а не на твой ПК. Для проверки дома убери WEBHOOK_BASE_URL и перезапусти.",
     );
     app.use(bot.webhookCallback(webhookPath));
-    await bot.telegram.setWebhook(`${webhookBase}${webhookPath}`);
-    console.log("Webhook:", `${webhookBase}${webhookPath}`);
+    try {
+      await bot.telegram.setWebhook(`${webhookBase}${webhookPath}`);
+      console.log("Webhook:", `${webhookBase}${webhookPath}`);
+    } catch (e) {
+      console.error("Webhook не включился — сайт работает, но бот может не получать сообщения:", e);
+    }
   } else {
-    await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-    void bot
-      .launch()
-      .then(() =>
-        console.log("Бот на связи. В Telegram открой СВОЕГО бота (не @BotFather) и напиши /myid"),
-      )
-      .catch((e) => console.error("Бот не подключился к Telegram (интернет/токен):", e));
+    try {
+      await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+      void bot
+        .launch()
+        .then(() =>
+          console.log("Бот на связи. В Telegram открой СВОЕГО бота (не @BotFather) и напиши /myid"),
+        )
+        .catch((e) => console.error("Бот не подключился к Telegram (интернет/токен):", e));
+    } catch (e) {
+      console.error("Бот не подключился к Telegram (интернет/токен) — сайт продолжает работать:", e);
+    }
   }
 
-  process.once("SIGINT", () => bot.stop("SIGINT"));
-  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  process.once("SIGINT", () => {
+    bot.stop("SIGINT");
+    server.close();
+  });
+  process.once("SIGTERM", () => {
+    bot.stop("SIGTERM");
+    server.close();
+  });
 }
 
 main().catch((e) => {

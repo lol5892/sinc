@@ -55,3 +55,25 @@
 
 1. В боте **/start** → кнопка **«Открыть планер»**.
 2. Добавь дело — второму пользователю придёт уведомление в Telegram.
+
+## Если Railway пишет Deployment crashed
+
+1. Открой **Deployments** → последний красный деплой → **View logs**.
+2. Проверь переменные в **Variables**:
+   - `BOT_TOKEN` — токен именно твоего бота от @BotFather.
+   - `TELEGRAM_ALLOWED_IDS` — твой id и id жены через запятую, например `296014099,123456789`.
+   - `WEB_APP_URL` — твой постоянный `https://...railway.app` адрес без слэша в конце.
+3. После правки Variables нажми **Redeploy**.
+4. Открой `https://твой-домен/api/health`. Должно быть примерно:
+
+   ```json
+   {
+     "ok": true,
+     "bot_configured": true,
+     "allowed_users": 2,
+     "mini_app_url": "https://...",
+     "missing": []
+   }
+   ```
+
+Если `missing` не пустой — добавь перечисленные переменные в Railway.
