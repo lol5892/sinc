@@ -245,21 +245,49 @@ async function main() {
 
   bot.command("myid", replyMyId);
 
-  bot.start(async (ctx) => {
+  bot.command("plan", async (ctx) => {
     const id = ctx.from?.id;
     if (id && ALLOWED.size && !ALLOWED.has(id)) {
       await ctx.reply("Этот бот только для семьи. Добавь свой Telegram ID в TELEGRAM_ALLOWED_IDS на сервере.");
       return;
     }
     if (WEB_APP_URL) {
-      await ctx.reply("План недели — открой мини-приложение:", {
+      await ctx.reply("Открой общий план недели. Внутри нажимай плюс в нужной клетке, задавай дело и время руками:", {
         reply_markup: {
-          inline_keyboard: [[{ text: "Открыть планер", web_app: { url: WEB_APP_URL } }]],
+          inline_keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
         },
       });
     } else {
       await ctx.reply(
         "Задай на сервере переменную WEB_APP_URL — публичный https-адрес, где открывается это приложение (Mini App).",
+      );
+    }
+  });
+
+  bot.start(async (ctx) => {
+    const id = ctx.from?.id;
+    if (id && ALLOWED.size && !ALLOWED.has(id)) {
+      await ctx.reply("Этот бот только для семьи. Добавь свой Telegram ID в TELEGRAM_ALLOWED_IDS на сервере.");
+      return;
+    }
+
+    const intro =
+      "Привет! Это общий семейный план недели.\n\n" +
+      "Как пользоваться:\n" +
+      "1. Открой мини-приложение.\n" +
+      "2. Нажми плюс в нужной клетке недели.\n" +
+      "3. Впиши дело, день, время, длительность и при желании напоминание.\n\n" +
+      "Жена открывает этого же бота со своего Telegram.";
+
+    if (WEB_APP_URL) {
+      await ctx.reply(intro, {
+        reply_markup: {
+          inline_keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
+        },
+      });
+    } else {
+      await ctx.reply(
+        `${intro}\n\nСейчас WEB_APP_URL пустой. Для Telegram Mini App нужен публичный https-адрес приложения. Пока можно проверять план в браузере через VITE_DEV_USER_ID.`,
       );
     }
   });
