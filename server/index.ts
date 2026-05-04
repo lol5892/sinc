@@ -12,7 +12,6 @@ import * as db from "./db.js";
 dotenv.config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
-const WEB_APP_URL = (process.env.WEB_APP_URL ?? "").replace(/\/$/, "");
 const PORT = Number(process.env.PORT ?? 3001);
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const ALLOWED = new Set(
@@ -23,6 +22,31 @@ const ALLOWED = new Set(
     .map(Number)
     .filter((n) => Number.isFinite(n)),
 );
+
+function normalizePublicUrl(value: string | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) return "";
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return withScheme.replace(/\/$/, "");
+}
+
+function detectWebAppUrl(): string {
+  const direct = normalizePublicUrl(process.env.WEB_APP_URL);
+  if (direct) return direct;
+
+  const platformUrl =
+    normalizePublicUrl(process.env.RAILWAY_PUBLIC_DOMAIN) ||
+    normalizePublicUrl(process.env.RAILWAY_STATIC_URL) ||
+    normalizePublicUrl(process.env.RENDER_EXTERNAL_URL) ||
+    normalizePublicUrl(process.env.PUBLIC_URL) ||
+    normalizePublicUrl(process.env.APP_URL);
+  if (platformUrl) return platformUrl;
+
+  const flyApp = process.env.FLY_APP_NAME?.trim();
+  return flyApp ? `https://${flyApp}.fly.dev` : "";
+}
+
+const WEB_APP_URL = detectWebAppUrl();
 
 /** Для отправки сообщений из HTTP (новое дело и т.д.). */
 let botForNotify: Telegraf | null = null;
@@ -226,6 +250,7 @@ async function main() {
     console.error("Укажи BOT_TOKEN в .env");
     process.exit(1);
   }
+  console.log(WEB_APP_URL ? `Mini App URL: ${WEB_APP_URL}` : "Mini App URL не задан");
 
   const bot = new Telegraf(BOT_TOKEN);
   botForNotify = bot;

@@ -6,7 +6,7 @@
 
 ## Telegram: один раз настроить
 
-1. Скопируй `.env.example` в `.env`: `BOT_TOKEN` ([@BotFather](https://t.me/BotFather)), `TELEGRAM_ALLOWED_IDS` (два id через запятую — [@userinfobot](https://t.me/userinfobot)), `WEB_APP_URL` — публичный **https** после деплоя (тот же базовый URL, что у фронта и API).
+1. Скопируй `.env.example` в `.env`: `BOT_TOKEN` ([@BotFather](https://t.me/BotFather)), `TELEGRAM_ALLOWED_IDS` (два id через запятую — [@userinfobot](https://t.me/userinfobot)), `WEB_APP_URL` — публичный **https** после деплоя (тот же базовый URL, что у фронта и API). На Railway/Render адрес обычно подхватывается автоматически, но `WEB_APP_URL` можно указать явно.
 2. В BotFather задай домен / Menu Button для Mini App на этот же URL.
 3. В облаке (Railway, Render, Fly.io и т.д.): старт `npm run start`, переменная `PORT` с платформы. Один процесс отдаёт `dist/` и `/api`.
 4. Оба пользователя нажали **Start** у бота — бот покажет кнопку **Открыть план недели** под полем ввода. Команда `/plan` повторно показывает кнопку открытия планера. Если написать просто `Start`, бот тоже ответит.
