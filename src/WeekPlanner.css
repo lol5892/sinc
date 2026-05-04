@@ -308,13 +308,19 @@
 }
 
 .wp-field input,
-.wp-field select {
+.wp-field select,
+.wp-readonly-time {
   font: inherit;
   padding: 0.45rem 0.55rem;
   border-radius: 0.5rem;
   border: 1px solid var(--wp-line);
   background: var(--wp-bg);
   color: var(--wp-fg);
+}
+
+.wp-readonly-time {
+  min-height: 2.15rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .wp-row2 {

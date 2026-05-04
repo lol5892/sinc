@@ -50,6 +50,10 @@ function parseClock(value: string): number | null {
   return hh * 60 + mm;
 }
 
+function durationOptions(current: number): number[] {
+  return Array.from(new Set([15, 30, 45, 60, 90, 120, 180, 240, current])).sort((a, b) => a - b);
+}
+
 function isoToDatetimeLocal(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -514,7 +518,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                     })
                   }
                 >
-                  {[15, 30, 45, 60, 90, 120, 180, 240].map((minutes) => (
+                  {durationOptions(editor.duration_minutes).map((minutes) => (
                     <option key={minutes} value={minutes}>
                       {fmtDuration(minutes)}
                     </option>
@@ -523,19 +527,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
               </label>
               <label className="wp-field">
                 До
-                <input
-                  type="time"
-                  step={900}
-                  value={fmtClock(Math.min(24 * 60 - SNAP, editor.start_minutes + editor.duration_minutes))}
-                  onChange={(e) => {
-                    const end = parseClock(e.target.value);
-                    if (end == null || end <= editor.start_minutes) return;
-                    setEditor({
-                      ...editor,
-                      duration_minutes: Math.max(SNAP, snapMin(end - editor.start_minutes)),
-                    });
-                  }}
-                />
+                <div className="wp-readonly-time">{fmtClock(editor.start_minutes + editor.duration_minutes)}</div>
               </label>
             </div>
             <label className="wp-field">
