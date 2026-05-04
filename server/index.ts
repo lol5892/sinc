@@ -245,52 +245,70 @@ async function main() {
 
   bot.command("myid", replyMyId);
 
-  bot.command("plan", async (ctx) => {
+  const checkFamilyAccess = async (ctx: Context): Promise<boolean> => {
     const id = ctx.from?.id;
     if (id && ALLOWED.size && !ALLOWED.has(id)) {
       await ctx.reply("Этот бот только для семьи. Добавь свой Telegram ID в TELEGRAM_ALLOWED_IDS на сервере.");
-      return;
+      return false;
     }
+    return true;
+  };
+
+  const planIntro =
+    "Привет! Это общий семейный план недели.\n\n" +
+    "Как пользоваться:\n" +
+    "1. Нажми кнопку «Открыть план недели» под полем ввода.\n" +
+    "2. В мини-приложении нажми плюс в нужной клетке недели.\n" +
+    "3. Впиши дело, день, время, длительность и при желании напоминание.\n\n" +
+    "Когда ты добавишь дело, жена получит уведомление в этом боте. Она может открыть этот же план и увидеть все дела.";
+
+  const replyWithPlannerButton = async (ctx: Context) => {
+    if (!(await checkFamilyAccess(ctx))) return;
+
     if (WEB_APP_URL) {
-      await ctx.reply("Открой общий план недели. Внутри нажимай плюс в нужной клетке, задавай дело и время руками:", {
+      await ctx.reply(planIntro, {
+        reply_markup: {
+          keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
+          resize_keyboard: true,
+          is_persistent: true,
+        },
+      });
+      await ctx.reply("Если кнопка снизу не видна, открой план этой кнопкой:", {
         reply_markup: {
           inline_keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
         },
       });
     } else {
       await ctx.reply(
-        "Задай на сервере переменную WEB_APP_URL — публичный https-адрес, где открывается это приложение (Mini App).",
+        `${planIntro}\n\nСейчас WEB_APP_URL пустой. Для кнопки Mini App нужен публичный https-адрес приложения. Пока можно проверять план в браузере через VITE_DEV_USER_ID.`,
       );
     }
-  });
+  };
 
-  bot.start(async (ctx) => {
-    const id = ctx.from?.id;
-    if (id && ALLOWED.size && !ALLOWED.has(id)) {
-      await ctx.reply("Этот бот только для семьи. Добавь свой Telegram ID в TELEGRAM_ALLOWED_IDS на сервере.");
-      return;
-    }
+  bot.command("plan", replyWithPlannerButton);
 
-    const intro =
-      "Привет! Это общий семейный план недели.\n\n" +
-      "Как пользоваться:\n" +
-      "1. Открой мини-приложение.\n" +
-      "2. Нажми плюс в нужной клетке недели.\n" +
-      "3. Впиши дело, день, время, длительность и при желании напоминание.\n\n" +
-      "Жена открывает этого же бота со своего Telegram.";
+  bot.start(replyWithPlannerButton);
+  bot.hears(/^\/?start$/i, replyWithPlannerButton);
+  bot.hears(/^открыть план недели$/i, replyWithPlannerButton);
 
-    if (WEB_APP_URL) {
-      await ctx.reply(intro, {
-        reply_markup: {
-          inline_keyboard: [[{ text: "Открыть план недели", web_app: { url: WEB_APP_URL } }]],
+  if (WEB_APP_URL) {
+    try {
+      await bot.telegram.setMyCommands([
+        { command: "start", description: "Показать кнопку планера" },
+        { command: "plan", description: "Открыть общий план недели" },
+        { command: "myid", description: "Показать мой Telegram ID" },
+      ]);
+      await bot.telegram.callApi("setChatMenuButton", {
+        menu_button: {
+          type: "web_app",
+          text: "План недели",
+          web_app: { url: WEB_APP_URL },
         },
       });
-    } else {
-      await ctx.reply(
-        `${intro}\n\nСейчас WEB_APP_URL пустой. Для Telegram Mini App нужен публичный https-адрес приложения. Пока можно проверять план в браузере через VITE_DEV_USER_ID.`,
-      );
+    } catch (e) {
+      console.error("Не удалось поставить кнопку Mini App в меню Telegram:", e);
     }
-  });
+  }
 
   const webhookPath = process.env.WEBHOOK_PATH || "/telegram/webhook";
   const webhookBase = (process.env.WEBHOOK_BASE_URL ?? "").replace(/\/$/, "");
