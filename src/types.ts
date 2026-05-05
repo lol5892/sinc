@@ -6,6 +6,7 @@ export type ApiEvent = {
   start_minutes: number;
   duration_minutes: number;
   title: string;
+  comment: string;
   owner_tg_id: number;
   owner_name: string;
   remind_at: string | null;

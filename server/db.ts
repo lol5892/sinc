@@ -10,6 +10,7 @@ export type EventRow = {
   start_minutes: number;
   duration_minutes: number;
   title: string;
+  comment: string;
   owner_tg_id: number;
   owner_name: string;
   remind_at: string | null;
@@ -34,6 +35,7 @@ function readDisk(): FileStore {
       events: p.events.map((e) => ({
         ...e,
         day_span: Number.isFinite((e as Partial<EventRow>).day_span) ? (e as Partial<EventRow>).day_span! : 1,
+        comment: typeof (e as Partial<EventRow>).comment === "string" ? (e as Partial<EventRow>).comment! : "",
         owner_name:
           typeof (e as Partial<EventRow>).owner_name === "string" && (e as Partial<EventRow>).owner_name!.trim()
             ? (e as Partial<EventRow>).owner_name!.trim()
@@ -86,7 +88,14 @@ export function updateEvent(
   patch: Partial<
     Pick<
       EventRow,
-      "day_index" | "day_span" | "start_minutes" | "duration_minutes" | "title" | "remind_at" | "reminder_sent"
+      | "day_index"
+      | "day_span"
+      | "start_minutes"
+      | "duration_minutes"
+      | "title"
+      | "comment"
+      | "remind_at"
+      | "reminder_sent"
     >
   >,
 ) {
@@ -98,6 +107,7 @@ export function updateEvent(
   if (patch.start_minutes !== undefined) ev.start_minutes = patch.start_minutes;
   if (patch.duration_minutes !== undefined) ev.duration_minutes = patch.duration_minutes;
   if (patch.title !== undefined) ev.title = patch.title;
+  if (patch.comment !== undefined) ev.comment = patch.comment;
   if (patch.remind_at !== undefined) ev.remind_at = patch.remind_at;
   if (patch.reminder_sent !== undefined) ev.reminder_sent = patch.reminder_sent;
   writeDisk(s);

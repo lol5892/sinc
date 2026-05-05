@@ -26,6 +26,22 @@ type Interaction = {
 };
 
 type PreviewPatch = { id: string; day_index?: number; day_span?: number; start_minutes?: number; duration_minutes?: number };
+type EditorState = {
+  mode: "create" | "edit";
+  id?: string;
+  day_index: number;
+  day_span: number;
+  start_minutes: number;
+  duration_minutes: number;
+  title: string;
+  comment: string;
+};
+
+function shortComment(comment: string): string {
+  const text = comment.trim();
+  if (!text) return "";
+  return text.length > 52 ? `${text.slice(0, 52).trim()}...` : text;
+}
 
 function ymdLocal(d: Date): string {
   const yyyy = d.getFullYear();
@@ -84,18 +100,9 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
   const [theme, setTheme] = useState<ThemeMode>(() => hourTheme());
   const [interaction, setInteraction] = useState<Interaction | null>(null);
   const [preview, setPreview] = useState<PreviewPatch | null>(null);
-  const [editor, setEditor] = useState<
-    | null
-    | {
-        mode: "create" | "edit";
-        id?: string;
-        day_index: number;
-        day_span: number;
-        start_minutes: number;
-        duration_minutes: number;
-        title: string;
-      }
-  >(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [commentEditorOpen, setCommentEditorOpen] = useState(false);
+  const [infoBubble, setInfoBubble] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const lastTapRef = useRef<{ day: number; min: number; t: number } | null>(null);
@@ -121,7 +128,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     setLoading(true);
     try {
       const r = await api.fetchWeek(monday, initData, devUserId, devUserName);
-      setEvents(r.events.map((e) => ({ ...e, day_span: e.day_span ?? 1 })));
+      setEvents(r.events.map((e) => ({ ...e, comment: e.comment ?? "", day_span: e.day_span ?? 1 })));
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -140,6 +147,18 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     for (const e of events) if (e.week_monday === monday) arr.push(e);
     return arr.sort((a, b) => a.day_index - b.day_index || a.start_minutes - b.start_minutes);
   }, [events, monday]);
+
+  const bubbleEvent = useMemo(
+    () => (infoBubble ? rows.find((e) => e.id === infoBubble.id) ?? null : null),
+    [infoBubble, rows],
+  );
+  const bubbleStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!infoBubble || typeof window === "undefined") return undefined;
+    return {
+      left: clamp(infoBubble.x - 140, 12, window.innerWidth - 292),
+      top: clamp(infoBubble.y + 12, 12, window.innerHeight - 230),
+    };
+  }, [infoBubble]);
 
   const displayEvent = (e: ApiEvent): ApiEvent => {
     const base = normalizeToGrid(e);
@@ -176,7 +195,10 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       start_minutes: min,
       duration_minutes: 60,
       title: "",
+      comment: "",
     });
+    setCommentEditorOpen(false);
+    setInfoBubble(null);
   };
 
   const onBlockPointerDown = (ev: React.PointerEvent, e: ApiEvent) => {
@@ -338,6 +360,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             start_minutes: editor.start_minutes,
             duration_minutes: editor.duration_minutes,
             title,
+            comment: editor.comment,
           },
           initData,
           devUserId,
@@ -352,6 +375,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             start_minutes: editor.start_minutes,
             duration_minutes: editor.duration_minutes,
             title,
+            comment: editor.comment,
           },
           initData,
           devUserId,
@@ -359,6 +383,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
         );
       }
       setEditor(null);
+      setCommentEditorOpen(false);
       void load();
     } catch (e) {
       setErr(String(e));
@@ -371,7 +396,9 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     const last = lastBlockTapRef.current;
     const isDouble = !!last && last.id === e.id && now - last.t < 340;
     lastBlockTapRef.current = { id: e.id, t: now };
+    setInfoBubble({ id: e.id, x: ev.clientX, y: ev.clientY });
     if (!isDouble || !isMine(e)) return;
+    setInfoBubble(null);
     setEditor({
       mode: "edit",
       id: e.id,
@@ -380,7 +407,9 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       start_minutes: e.start_minutes,
       duration_minutes: e.duration_minutes,
       title: e.title,
+      comment: e.comment,
     });
+    setCommentEditorOpen(false);
   };
 
   const removeFromEditor = async () => {
@@ -388,6 +417,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     try {
       await api.deleteEvent(editor.id, initData, devUserId, devUserName);
       setEditor(null);
+      setCommentEditorOpen(false);
       void load();
     } catch (e) {
       setErr(String(e));
@@ -395,7 +425,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
   };
 
   return (
-    <div className={`wp ${theme === "dark" ? "theme-dark" : "theme-light"}`}>
+    <div className={`wp ${theme === "dark" ? "theme-dark" : "theme-light"}`} onPointerDown={() => setInfoBubble(null)}>
       <header className="wp-head glass">
         <div className="wp-brand">
           <span className="wp-logo">◍</span>
@@ -454,6 +484,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
               const leftPct = (e.day_index / 7) * 100;
               const widthPct = (e.day_span / 7) * 100;
               const mine = isMine(e);
+              const commentPreview = shortComment(e.comment);
               return (
                 <article
                   key={e.id}
@@ -472,11 +503,13 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
                   <div className="wp-title-btn">
                     <div className="wp-block-title">{e.title}</div>
+                    {commentPreview && <div className="wp-block-comment">{commentPreview}</div>}
                     <div className="wp-block-owner">Добавил: {e.owner_name}</div>
                     <div className="wp-block-meta">
                       {fmtClock(e.start_minutes)} · {fmtClock(e.start_minutes + e.duration_minutes)} · {e.day_span} дн.
                     </div>
                   </div>
+                  {e.comment.trim() && <span className="wp-block-comment-dot" />}
                 </article>
               );
             })}
@@ -553,12 +586,18 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                 />
               </label>
             </div>
+            <div className="wp-comment-preview">
+              {editor.comment.trim() ? editor.comment.trim() : "Комментарий пока не добавлен"}
+            </div>
             <div className="wp-actions">
               {editor.mode === "edit" && events.some((event) => event.id === editor.id && isMine(event)) && (
                 <button type="button" className="wp-btn danger" onClick={() => void removeFromEditor()}>
                   Удалить
                 </button>
               )}
+              <button type="button" className="wp-btn ghost" onClick={() => setCommentEditorOpen(true)}>
+                {editor.comment.trim() ? "Изменить комментарий" : "Добавить комментарий"}
+              </button>
               <button type="button" className="wp-btn ghost" onClick={() => setEditor(null)}>
                 Отмена
               </button>
@@ -566,6 +605,48 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                 OK
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {commentEditorOpen && editor && (
+        <div className="wp-sheet-root" role="dialog" aria-modal onPointerDown={() => setCommentEditorOpen(false)}>
+          <div className="wp-sheet" onPointerDown={(ev) => ev.stopPropagation()}>
+            <h3>Комментарий к делу</h3>
+            <label className="wp-field">
+              Комментарий
+              <textarea
+                autoFocus
+                value={editor.comment}
+                maxLength={1000}
+                onChange={(e) => setEditor({ ...editor, comment: e.target.value })}
+                placeholder="Например: что купить, куда позвонить, детали дела..."
+              />
+            </label>
+            <div className="wp-actions">
+              <button type="button" className="wp-btn ghost" onClick={() => setEditor({ ...editor, comment: "" })}>
+                Очистить
+              </button>
+              <button type="button" className="wp-btn primary" onClick={() => setCommentEditorOpen(false)}>
+                Готово
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {bubbleEvent && bubbleStyle && (
+        <div
+          className="wp-info-bubble"
+          style={bubbleStyle}
+          onPointerDown={(ev) => ev.stopPropagation()}
+        >
+          <div className="wp-info-title">{bubbleEvent.title}</div>
+          <div className="wp-info-time">
+            {WD[bubbleEvent.day_index]} · {fmtClock(bubbleEvent.start_minutes)} —{" "}
+            {fmtClock(bubbleEvent.start_minutes + bubbleEvent.duration_minutes)}
+          </div>
+          <div className="wp-info-owner">Добавил: {bubbleEvent.owner_name}</div>
+          <div className={`wp-info-comment ${bubbleEvent.comment.trim() ? "" : "wp-info-empty"}`}>
+            {bubbleEvent.comment.trim() || "Комментария пока нет"}
           </div>
         </div>
       )}
