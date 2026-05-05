@@ -146,7 +146,7 @@
   position: sticky;
   left: 0;
   top: 0;
-  z-index: 36;
+  z-index: 50;
   background: var(--wp-bg);
   border-bottom: 1px solid var(--wp-line);
 }
@@ -158,7 +158,8 @@
   padding: 0.55rem 0.3rem;
   position: sticky;
   top: 0;
-  z-index: 35;
+  z-index: 45;
+  background: color-mix(in srgb, var(--wp-panel) 96%, transparent);
 }
 
 .wp-dn {
@@ -175,7 +176,7 @@
 .wp-time {
   position: sticky;
   left: 0;
-  z-index: 4;
+  z-index: 30;
   border-right: 1px solid var(--wp-line);
   background: var(--wp-bg);
 }
