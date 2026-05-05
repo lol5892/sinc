@@ -27,13 +27,20 @@ type Interaction = {
 
 type PreviewPatch = { id: string; day_index?: number; day_span?: number; start_minutes?: number; duration_minutes?: number };
 
+function ymdLocal(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function mondayISO(d: Date): string {
   const x = new Date(d);
   const day = x.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   x.setDate(x.getDate() + diff);
   x.setHours(0, 0, 0, 0);
-  return x.toISOString().slice(0, 10);
+  return ymdLocal(x);
 }
 
 function addDays(iso: string, n: number): Date {
@@ -125,21 +132,36 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   const createInline = async (day: number, minutes: number) => {
     try {
       const tempTitle = "Новое дело";
+      const startMinutes = clamp(snapMin(minutes), 0, 24 * 60 - SNAP);
       const r = await api.createEvent(
         {
           week_monday: monday,
           day_index: day,
           day_span: 1,
-          start_minutes: clamp(snapMin(minutes), 0, 24 * 60 - SNAP),
+          start_minutes: startMinutes,
           duration_minutes: 60,
           title: tempTitle,
         },
         initData,
         devUserId,
       );
+      setEvents((prev) => [
+        ...prev,
+        {
+          id: r.id,
+          week_monday: monday,
+          day_index: day,
+          day_span: 1,
+          start_minutes: startMinutes,
+          duration_minutes: 60,
+          title: "",
+          owner_tg_id: myTgId ?? 0,
+          remind_at: null,
+          reminder_sent: 0,
+        },
+      ]);
       setDraftTitles((prev) => ({ ...prev, [r.id]: "" }));
       setEditingId(r.id);
-      void load();
     } catch (e) {
       setErr(String(e));
     }
@@ -344,6 +366,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                       autoFocus
                       className="wp-inline-input"
                       value={titleValue}
+                      onPointerDown={(ev) => ev.stopPropagation()}
                       onChange={(ev) => setDraftTitles((p) => ({ ...p, [e.id]: ev.target.value }))}
                       onBlur={() => void commitInlineTitle(e)}
                       onKeyDown={(ev) => {
