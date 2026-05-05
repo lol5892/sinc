@@ -11,13 +11,13 @@
 
 1. Зайди на https://railway.app и войди (удобно через GitHub).
 2. **New project** → **GitHub Repository** → выбери репозиторий **sinc**.
-3. Railway сам подхватит Node: обычно **Build** = `npm run build`, **Start** = `npm run start`. Если спросит вручную:
-   - Build: `npm run build`
+3. Railway сам подхватит настройки из `railway.json`. Если спросит вручную:
+   - Build: `npm ci --include=dev && npm run build`
    - Start: `npm run start`
 
 ## Если деплой «CRASHED»
 
-Чаще всего в **Variables** на Railway **не добавлен `BOT_TOKEN`** (или неверный токен). Раньше контейнер сразу падал; в новых версиях кода сервер может подняться без бота — смотри **Deploy Logs**.
+Чаще всего в **Variables** на Railway **не добавлен `BOT_TOKEN`** (или неверный токен), либо Railway запустил старую сборку без `railway.json`. В новых версиях кода сервер стартует из скомпилированного `dist-server/` и проверяется через `/api/health` — смотри **Deploy Logs**.
 
 Обязательно добавь: **`BOT_TOKEN`**, **`TELEGRAM_ALLOWED_IDS`**, **`NODE_ENV`** = `production`.
 
@@ -34,7 +34,7 @@
 | `NODE_ENV` | `production` |
 | `WEB_APP_URL` | пока **пусто** — заполни после шага 4 |
 
-`PORT` Railway часто подставляет сам — не дублируй, если уже есть.
+`PORT` Railway часто подставляет сам — не дублируй, если уже есть. Если задаёшь `HOST`, используй `0.0.0.0`, иначе Railway может не получить ответ от сайта.
 
 Сохрани — дождись зелёного деплоя.
 
