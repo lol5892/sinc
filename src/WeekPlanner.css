@@ -7,6 +7,7 @@
   background: radial-gradient(120% 60% at 50% 0%, var(--wp-glow), transparent 55%), var(--wp-bg);
   overscroll-behavior-y: contain;
   overflow: hidden;
+  --week-row-h: 56px;
 }
 
 .wp.theme-dark {
@@ -139,7 +140,7 @@
   grid-template-columns: 58px repeat(7, minmax(88px, 1fr));
   grid-template-rows: auto 1fr;
   min-width: 760px;
-  min-height: calc(24 * 56px + 48px);
+  min-height: calc(24 * 56px + var(--week-row-h));
 }
 
 .wp-corner {
@@ -149,13 +150,20 @@
   z-index: 50;
   background: var(--wp-bg);
   border-bottom: 1px solid var(--wp-line);
+  height: var(--week-row-h);
+  box-sizing: border-box;
 }
 
 .wp-dhead {
   text-align: center;
   border-bottom: 1px solid var(--wp-line);
   border-left: 1px solid var(--wp-line);
-  padding: 0.55rem 0.3rem;
+  height: var(--week-row-h);
+  box-sizing: border-box;
+  padding: 0.35rem 0.2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   position: sticky;
   top: 0;
   z-index: 45;
@@ -213,7 +221,7 @@
 
 .wp-events-layer {
   position: absolute;
-  top: 48px;
+  top: var(--week-row-h);
   right: 0;
   bottom: 0;
   z-index: 12;
