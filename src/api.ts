@@ -23,6 +23,7 @@ export async function createEvent(
   body: {
     week_monday: string;
     day_index: number;
+    day_span?: number;
     start_minutes: number;
     duration_minutes: number;
     title: string;
@@ -44,6 +45,7 @@ export async function patchEvent(
   id: string,
   patch: Partial<{
     day_index: number;
+    day_span: number;
     start_minutes: number;
     duration_minutes: number;
     title: string;

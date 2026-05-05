@@ -6,6 +6,7 @@ export type EventRow = {
   id: string;
   week_monday: string;
   day_index: number;
+  day_span: number;
   start_minutes: number;
   duration_minutes: number;
   title: string;
@@ -28,7 +29,12 @@ function readDisk(): FileStore {
     const raw = fs.readFileSync(storePath, "utf-8");
     const p = JSON.parse(raw) as FileStore;
     if (!Array.isArray(p.events)) return { events: [] };
-    return p;
+    return {
+      events: p.events.map((e) => ({
+        ...e,
+        day_span: Number.isFinite((e as Partial<EventRow>).day_span) ? (e as Partial<EventRow>).day_span! : 1,
+      })),
+    };
   } catch {
     return { events: [] };
   }
@@ -72,13 +78,17 @@ export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_se
 export function updateEvent(
   id: string,
   patch: Partial<
-    Pick<EventRow, "day_index" | "start_minutes" | "duration_minutes" | "title" | "remind_at" | "reminder_sent">
+    Pick<
+      EventRow,
+      "day_index" | "day_span" | "start_minutes" | "duration_minutes" | "title" | "remind_at" | "reminder_sent"
+    >
   >,
 ) {
   const s = getStore();
   const ev = s.events.find((e) => e.id === id);
   if (!ev) return;
   if (patch.day_index !== undefined) ev.day_index = patch.day_index;
+  if (patch.day_span !== undefined) ev.day_span = patch.day_span;
   if (patch.start_minutes !== undefined) ev.start_minutes = patch.start_minutes;
   if (patch.duration_minutes !== undefined) ev.duration_minutes = patch.duration_minutes;
   if (patch.title !== undefined) ev.title = patch.title;

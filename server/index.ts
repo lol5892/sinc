@@ -113,6 +113,7 @@ app.post("/api/events", (req, res) => {
   const b = req.body as {
     week_monday?: string;
     day_index?: number;
+    day_span?: number;
     start_minutes?: number;
     duration_minutes?: number;
     title?: string;
@@ -122,6 +123,8 @@ app.post("/api/events", (req, res) => {
     return res.status(400).json({ error: "week_monday" });
   if (typeof b.day_index !== "number" || b.day_index < 0 || b.day_index > 6)
     return res.status(400).json({ error: "day_index" });
+  if (typeof b.day_span !== "undefined" && (typeof b.day_span !== "number" || b.day_span < 1 || b.day_span > 7))
+    return res.status(400).json({ error: "day_span" });
   if (typeof b.start_minutes !== "number" || b.start_minutes < 0 || b.start_minutes >= 24 * 60)
     return res.status(400).json({ error: "start_minutes" });
   if (typeof b.duration_minutes !== "number" || b.duration_minutes < 15 || b.duration_minutes > 24 * 60)
@@ -133,6 +136,7 @@ app.post("/api/events", (req, res) => {
     id,
     week_monday: b.week_monday,
     day_index: b.day_index,
+    day_span: Math.min(7 - b.day_index, b.day_span ?? 1),
     start_minutes: b.start_minutes,
     duration_minutes: b.duration_minutes,
     title: titleTrim,
@@ -161,6 +165,7 @@ app.patch("/api/events/:id", (req, res) => {
 
   const b = req.body as Partial<{
     day_index: number;
+    day_span: number;
     start_minutes: number;
     duration_minutes: number;
     title: string;
@@ -168,6 +173,7 @@ app.patch("/api/events/:id", (req, res) => {
   }>;
   const patch: Parameters<typeof db.updateEvent>[1] = {};
   if (typeof b.day_index === "number" && b.day_index >= 0 && b.day_index <= 6) patch.day_index = b.day_index;
+  if (typeof b.day_span === "number" && b.day_span >= 1 && b.day_span <= 7) patch.day_span = b.day_span;
   if (typeof b.start_minutes === "number" && b.start_minutes >= 0 && b.start_minutes < 24 * 60)
     patch.start_minutes = b.start_minutes;
   if (typeof b.duration_minutes === "number" && b.duration_minutes >= 15 && b.duration_minutes <= 24 * 60)

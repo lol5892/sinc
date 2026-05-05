@@ -2,6 +2,7 @@ export type ApiEvent = {
   id: string;
   week_monday: string;
   day_index: number;
+  day_span: number;
   start_minutes: number;
   duration_minutes: number;
   title: string;

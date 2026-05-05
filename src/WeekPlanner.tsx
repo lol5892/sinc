@@ -1,13 +1,31 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiEvent } from "./types";
 import * as api from "./api";
 import "./WeekPlanner.css";
 
-const SNAP = 15;
-const HOUR_H = 44;
+const SNAP = 30;
+const HOUR_H = 56;
+const SLOT_H = HOUR_H / 2;
 const DAY_H = 24 * HOUR_H;
-const TIME_W = 46;
+const TIME_W = 58;
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+type Props = { initData: string; devUserId?: string; myTgId: number | null };
+type ThemeMode = "light" | "dark";
+
+type Interaction = {
+  id: string;
+  pointerId: number;
+  mode: "drag" | "resize-bottom" | "resize-top" | "resize-right";
+  x0: number;
+  y0: number;
+  day0: number;
+  span0: number;
+  start0: number;
+  dur0: number;
+};
+
+type PreviewPatch = { id: string; day_index?: number; day_span?: number; start_minutes?: number; duration_minutes?: number };
 
 function mondayISO(d: Date): string {
   const x = new Date(d);
@@ -34,53 +52,40 @@ function fmtClock(m: number): string {
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
-function isoToDatetimeLocal(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+function hourTheme(): ThemeMode {
+  const h = new Date().getHours();
+  return h >= 7 && h < 20 ? "light" : "dark";
 }
 
-type Props = {
-  initData: string;
-  devUserId?: string;
-  myTgId: number | null;
-};
-
-type DragState = {
-  id: string;
-  pointerId: number;
-  start0: number;
-  dur0: number;
-  y0: number;
-};
-
-type ResizeState = {
-  id: string;
-  pointerId: number;
-  dur0: number;
-  start0: number;
-  y0: number;
-};
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
 
 export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   const [monday, setMonday] = useState(() => mondayISO(new Date()));
   const [events, setEvents] = useState<ApiEvent[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const [resize, setResize] = useState<ResizeState | null>(null);
-  const [preview, setPreview] = useState<Partial<Pick<ApiEvent, "day_index" | "start_minutes" | "duration_minutes">> & { id: string } | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(() => hourTheme());
+  const [interaction, setInteraction] = useState<Interaction | null>(null);
+  const [preview, setPreview] = useState<PreviewPatch | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftTitles, setDraftTitles] = useState<Record<string, string>>({});
+
   const gridRef = useRef<HTMLDivElement>(null);
-  const ignoreClickUntil = useRef(0);
+  const lastTapRef = useRef<{ day: number; min: number; t: number } | null>(null);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTheme(hourTheme()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const load = useCallback(async () => {
     setErr(null);
     setLoading(true);
     try {
       const r = await api.fetchWeek(monday, initData, devUserId);
-      setEvents(r.events);
+      setEvents(r.events.map((e) => ({ ...e, day_span: e.day_span ?? 1 })));
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -92,32 +97,23 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     void load();
   }, [load]);
 
-  const dayDates = useMemo(
-    () => WD.map((label, i) => ({ label, date: addDays(monday, i) })),
-    [monday],
-  );
+  const dayDates = useMemo(() => WD.map((label, i) => ({ label, date: addDays(monday, i) })), [monday]);
 
-  const eventsByDay = useMemo(() => {
-    const m = new Map<number, ApiEvent[]>();
-    for (let i = 0; i < 7; i++) m.set(i, []);
-    for (const e of events) {
-      if (e.week_monday !== monday) continue;
-      m.get(e.day_index)?.push(e);
-    }
-    for (const arr of m.values()) arr.sort((a, b) => a.start_minutes - b.start_minutes);
-    return m;
+  const rows = useMemo(() => {
+    const arr: ApiEvent[] = [];
+    for (const e of events) if (e.week_monday === monday) arr.push(e);
+    return arr.sort((a, b) => a.day_index - b.day_index || a.start_minutes - b.start_minutes);
   }, [events, monday]);
 
-  const displayEvent = (e: ApiEvent) => {
-    if (preview?.id === e.id) {
-      return {
-        ...e,
-        day_index: preview.day_index ?? e.day_index,
-        start_minutes: preview.start_minutes ?? e.start_minutes,
-        duration_minutes: preview.duration_minutes ?? e.duration_minutes,
-      };
-    }
-    return e;
+  const displayEvent = (e: ApiEvent): ApiEvent => {
+    if (!preview || preview.id !== e.id) return e;
+    return {
+      ...e,
+      day_index: preview.day_index ?? e.day_index,
+      day_span: preview.day_span ?? e.day_span,
+      start_minutes: preview.start_minutes ?? e.start_minutes,
+      duration_minutes: preview.duration_minutes ?? e.duration_minutes,
+    };
   };
 
   const shiftWeek = (delta: number) => {
@@ -126,118 +122,127 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     setMonday(mondayISO(d));
   };
 
-  const onPointerDownBlock = (ev: React.PointerEvent, e: ApiEvent) => {
-    if ((ev.target as HTMLElement).closest(".resize-handle")) return;
-    ev.currentTarget.setPointerCapture(ev.pointerId);
-    setDrag({
-      id: e.id,
-      pointerId: ev.pointerId,
-      start0: e.start_minutes,
-      dur0: e.duration_minutes,
-      y0: ev.clientY,
-    });
-    setPreview({
-      id: e.id,
-      day_index: e.day_index,
-      start_minutes: e.start_minutes,
-      duration_minutes: e.duration_minutes,
-    });
+  const createInline = async (day: number, minutes: number) => {
+    try {
+      const tempTitle = "Новое дело";
+      const r = await api.createEvent(
+        {
+          week_monday: monday,
+          day_index: day,
+          day_span: 1,
+          start_minutes: clamp(snapMin(minutes), 0, 24 * 60 - SNAP),
+          duration_minutes: 60,
+          title: tempTitle,
+        },
+        initData,
+        devUserId,
+      );
+      setDraftTitles((prev) => ({ ...prev, [r.id]: "" }));
+      setEditingId(r.id);
+      void load();
+    } catch (e) {
+      setErr(String(e));
+    }
   };
 
-  const onPointerDownResize = (ev: React.PointerEvent, e: ApiEvent) => {
+  const onBackgroundTap = (ev: React.PointerEvent, day: number) => {
+    if (ev.target !== ev.currentTarget) return;
+    const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
+    const y = ev.clientY - rect.top;
+    const min = clamp(snapMin((y / DAY_H) * 24 * 60), 0, 24 * 60 - SNAP);
+    const now = Date.now();
+    const last = lastTapRef.current;
+    const isDouble = !!last && last.day === day && Math.abs(last.min - min) <= SNAP && now - last.t < 340;
+    lastTapRef.current = { day, min, t: now };
+    if (!isDouble) return;
+    void createInline(day, min);
+  };
+
+  const beginInteraction = (ev: React.PointerEvent, e: ApiEvent, mode: Interaction["mode"]) => {
     ev.stopPropagation();
     ev.currentTarget.setPointerCapture(ev.pointerId);
-    setResize({
+    setInteraction({
       id: e.id,
       pointerId: ev.pointerId,
-      dur0: e.duration_minutes,
-      start0: e.start_minutes,
+      mode,
+      x0: ev.clientX,
       y0: ev.clientY,
+      day0: e.day_index,
+      span0: e.day_span,
+      start0: e.start_minutes,
+      dur0: e.duration_minutes,
     });
     setPreview({
       id: e.id,
-      duration_minutes: e.duration_minutes,
-      start_minutes: e.start_minutes,
       day_index: e.day_index,
+      day_span: e.day_span,
+      start_minutes: e.start_minutes,
+      duration_minutes: e.duration_minutes,
     });
   };
 
   useEffect(() => {
-    if (!drag && !resize) return;
+    if (!interaction) return;
+
     const onMove = (ev: PointerEvent) => {
-      if (drag && ev.pointerId === drag.pointerId) {
-        const gr = gridRef.current?.getBoundingClientRect();
-        if (!gr) return;
-        const colW = (gr.width - TIME_W) / 7;
-        const areaLeft = gr.left + TIME_W;
-        const dy = ev.clientY - drag.y0;
-        const dMin = (dy / HOUR_H) * 60;
-        let start = snapMin(drag.start0 + dMin);
-        start = Math.max(0, Math.min(24 * 60 - drag.dur0, start));
-        const relX = ev.clientX - areaLeft;
-        let day = Math.floor(relX / colW);
-        day = Math.max(0, Math.min(6, day));
-        setPreview({
-          id: drag.id,
-          start_minutes: start,
-          day_index: day,
-          duration_minutes: drag.dur0,
-        });
+      if (ev.pointerId !== interaction.pointerId) return;
+      const gr = gridRef.current?.getBoundingClientRect();
+      if (!gr) return;
+      const colW = (gr.width - TIME_W) / 7;
+      const dxDays = Math.round((ev.clientX - interaction.x0) / colW);
+      const dyMin = snapMin(((ev.clientY - interaction.y0) / SLOT_H) * SNAP);
+
+      if (interaction.mode === "drag") {
+        const day = clamp(interaction.day0 + dxDays, 0, 6);
+        const span = clamp(interaction.span0, 1, 7 - day);
+        const start = clamp(interaction.start0 + dyMin, 0, 24 * 60 - interaction.dur0);
+        setPreview({ id: interaction.id, day_index: day, day_span: span, start_minutes: start, duration_minutes: interaction.dur0 });
+        return;
       }
-      if (resize && ev.pointerId === resize.pointerId) {
-        const dy = ev.clientY - resize.y0;
-        const dMin = (dy / HOUR_H) * 60;
-        let dur = snapMin(Math.max(SNAP, resize.dur0 + dMin));
-        const maxDur = 24 * 60 - resize.start0;
-        dur = Math.min(dur, maxDur);
-        setPreview({
-          id: resize.id,
-          duration_minutes: dur,
-          start_minutes: resize.start0,
-        });
+
+      if (interaction.mode === "resize-bottom") {
+        const dur = clamp(interaction.dur0 + dyMin, SNAP, 24 * 60 - interaction.start0);
+        setPreview({ id: interaction.id, duration_minutes: dur, start_minutes: interaction.start0 });
+        return;
+      }
+
+      if (interaction.mode === "resize-top") {
+        const newStart = clamp(interaction.start0 + dyMin, 0, interaction.start0 + interaction.dur0 - SNAP);
+        const newDur = clamp(interaction.dur0 - (newStart - interaction.start0), SNAP, 24 * 60 - newStart);
+        setPreview({ id: interaction.id, start_minutes: newStart, duration_minutes: newDur });
+        return;
+      }
+
+      if (interaction.mode === "resize-right") {
+        const span = clamp(interaction.span0 + dxDays, 1, 7 - interaction.day0);
+        setPreview({ id: interaction.id, day_span: span });
       }
     };
+
     const onUp = async (ev: PointerEvent) => {
-      if (drag && ev.pointerId === drag.pointerId) {
-        const gr = gridRef.current?.getBoundingClientRect();
-        const colW = gr ? (gr.width - TIME_W) / 7 : 1;
-        const areaLeft = gr ? gr.left + TIME_W : 0;
-        const dy = ev.clientY - drag.y0;
-        let start = snapMin(drag.start0 + (dy / HOUR_H) * 60);
-        start = Math.max(0, Math.min(24 * 60 - drag.dur0, start));
-        const relX = ev.clientX - areaLeft;
-        let day = Math.floor(relX / colW);
-        day = Math.max(0, Math.min(6, day));
-        setDrag(null);
-        setPreview(null);
-        ignoreClickUntil.current = performance.now() + 500;
-        try {
-          await api.patchEvent(
-            drag.id,
-            { day_index: day, start_minutes: start, duration_minutes: drag.dur0 },
-            initData,
-            devUserId,
-          );
-          void load();
-        } catch (e) {
-          setErr(String(e));
-        }
-      }
-      if (resize && ev.pointerId === resize.pointerId) {
-        const dy = ev.clientY - resize.y0;
-        let dur = snapMin(Math.max(SNAP, resize.dur0 + (dy / HOUR_H) * 60));
-        dur = Math.min(dur, 24 * 60 - resize.start0);
-        setResize(null);
-        setPreview(null);
-        ignoreClickUntil.current = performance.now() + 500;
-        try {
-          await api.patchEvent(resize.id, { duration_minutes: dur }, initData, devUserId);
-          void load();
-        } catch (e) {
-          setErr(String(e));
-        }
+      if (ev.pointerId !== interaction.pointerId) return;
+      const p = preview;
+      setInteraction(null);
+      setPreview(null);
+      if (!p || p.id !== interaction.id) return;
+      try {
+        await api.patchEvent(
+          interaction.id,
+          {
+            day_index: p.day_index,
+            day_span: p.day_span,
+            start_minutes: p.start_minutes,
+            duration_minutes: p.duration_minutes,
+          },
+          initData,
+          devUserId,
+        );
+        void load();
+      } catch (e) {
+        setErr(String(e));
       }
     };
+
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
@@ -246,81 +251,15 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [drag, resize, initData, devUserId, load]);
+  }, [interaction, preview, initData, devUserId, load]);
 
-  const [editor, setEditor] = useState<
-    | null
-    | ({
-        mode: "create" | "edit";
-        day_index: number;
-        start_minutes: number;
-        duration_minutes: number;
-        title: string;
-        remind_at: string;
-      } & Partial<{ id: string }>)
-  >(null);
-
-  const openCreateAt = (day_index: number, start_minutes: number) => {
-    setEditor({
-      mode: "create",
-      day_index,
-      start_minutes: snapMin(start_minutes),
-      duration_minutes: 60,
-      title: "",
-      remind_at: "",
-    });
-  };
-
-  const onBackgroundPointer = (ev: React.PointerEvent, day: number) => {
-    if (ev.target !== ev.currentTarget) return;
-    const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
-    const y = ev.clientY - rect.top;
-    const mins = snapMin((y / DAY_H) * 24 * 60);
-    openCreateAt(day, Math.min(24 * 60 - SNAP, mins));
-  };
-
-  const saveEditor = async () => {
-    if (!editor) return;
+  const commitInlineTitle = async (ev: ApiEvent) => {
+    const v = (draftTitles[ev.id] ?? ev.title).trim();
+    const title = v.length ? v : "Без названия";
+    setEditingId(null);
     try {
-      if (editor.mode === "create") {
-        await api.createEvent(
-          {
-            week_monday: monday,
-            day_index: editor.day_index,
-            start_minutes: editor.start_minutes,
-            duration_minutes: editor.duration_minutes,
-            title: editor.title,
-            remind_at: editor.remind_at ? new Date(editor.remind_at).toISOString() : null,
-          },
-          initData,
-          devUserId,
-        );
-      } else if (editor.id) {
-        await api.patchEvent(
-          editor.id,
-          {
-            day_index: editor.day_index,
-            start_minutes: editor.start_minutes,
-            duration_minutes: editor.duration_minutes,
-            title: editor.title,
-            remind_at: editor.remind_at ? new Date(editor.remind_at).toISOString() : null,
-          },
-          initData,
-          devUserId,
-        );
-      }
-      setEditor(null);
-      void load();
-    } catch (e) {
-      setErr(String(e));
-    }
-  };
-
-  const deleteEditor = async () => {
-    if (!editor?.id) return;
-    try {
-      await api.deleteEvent(editor.id, initData, devUserId);
-      setEditor(null);
+      await api.patchEvent(ev.id, { title }, initData, devUserId);
+      setDraftTitles((prev) => ({ ...prev, [ev.id]: title }));
       void load();
     } catch (e) {
       setErr(String(e));
@@ -328,41 +267,36 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   };
 
   return (
-    <div className="wp">
-      <header className="wp-head">
+    <div className={`wp ${theme === "dark" ? "theme-dark" : "theme-light"}`}>
+      <header className="wp-head glass">
         <div className="wp-brand">
-          <span className="wp-logo">◇</span>
+          <span className="wp-logo">◍</span>
           <div>
-            <div className="wp-title">Неделя вдвоём</div>
-            <div className="wp-sub">Перетаскивай блоки, тяни низ за длительность</div>
+            <div className="wp-title">Week Duo Planner</div>
+            <div className="wp-sub">Двойной тап создаёт блок на 1 час • шаг сетки 30 минут</div>
           </div>
         </div>
         <div className="wp-nav">
           <button type="button" className="wp-btn ghost" onClick={() => shiftWeek(-1)}>
             ←
           </button>
-          <span className="wp-range">{dayDates[0].date.toLocaleDateString("ru-RU")} — {dayDates[6].date.toLocaleDateString("ru-RU")}</span>
+          <span className="wp-range">
+            {dayDates[0].date.toLocaleDateString("ru-RU")} — {dayDates[6].date.toLocaleDateString("ru-RU")}
+          </span>
           <button type="button" className="wp-btn ghost" onClick={() => shiftWeek(1)}>
             →
-          </button>
-          <button type="button" className="wp-btn primary" onClick={() => openCreateAt(0, 9 * 60)}>
-            + Дело
           </button>
         </div>
       </header>
 
-      {err && (
-        <div className="wp-toast err" role="alert">
-          {err}
-        </div>
-      )}
-      {loading && <div className="wp-loading">Загрузка…</div>}
+      {err && <div className="wp-toast err">{err}</div>}
+      {loading && <div className="wp-loading">Синхронизация…</div>}
 
       <div className="wp-scroll">
         <div className="wp-grid" ref={gridRef}>
           <div className="wp-corner" style={{ width: TIME_W }} />
           {dayDates.map((d, i) => (
-            <div key={i} className="wp-dhead">
+            <div key={i} className="wp-dhead glass-soft">
               <span className="wp-dn">{d.label}</span>
               <span className="wp-dd">{d.date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
             </div>
@@ -377,124 +311,70 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
           </div>
 
           {dayDates.map((_, day) => (
-            <div
-              key={day}
-              className="wp-day"
-              style={{ height: DAY_H }}
-              onPointerDown={(e) => onBackgroundPointer(e, day)}
-            >
-              {Array.from({ length: 24 }, (_, h) => (
-                <div key={h} className="wp-slotline" style={{ top: h * HOUR_H }} />
+            <div key={day} className="wp-day" style={{ height: DAY_H }} onPointerDown={(e) => onBackgroundTap(e, day)}>
+              {Array.from({ length: 48 }, (_, i) => (
+                <div key={i} className={`wp-slotline ${i % 2 === 0 ? "major" : "minor"}`} style={{ top: i * SLOT_H }} />
               ))}
-              {(eventsByDay.get(day) ?? []).map((ev) => {
-                const e = displayEvent(ev);
-                const top = (e.start_minutes / 60) * HOUR_H;
-                const h = (e.duration_minutes / 60) * HOUR_H;
-                const mine = myTgId !== null && e.owner_tg_id === myTgId;
-                return (
-                  <div
-                    key={ev.id}
-                    className={`wp-block ${mine ? "mine" : "theirs"}`}
-                    style={{ top, height: Math.max(h, 28) }}
-                    onPointerDown={(p) => onPointerDownBlock(p, ev)}
-                    onClick={(c) => {
-                      if (performance.now() < ignoreClickUntil.current) return;
-                      c.stopPropagation();
-                      setEditor({
-                        mode: "edit",
-                        id: ev.id,
-                        day_index: ev.day_index,
-                        start_minutes: ev.start_minutes,
-                        duration_minutes: ev.duration_minutes,
-                        title: ev.title,
-                        remind_at: isoToDatetimeLocal(ev.remind_at),
-                      });
-                    }}
-                  >
-                    <div className="wp-block-title">{e.title}</div>
-                    <div className="wp-block-meta">
-                      {fmtClock(e.start_minutes)} · {Math.round(e.duration_minutes / 60)}ч
-                    </div>
-                    <div
-                      className="resize-handle"
-                      onPointerDown={(p) => onPointerDownResize(p, ev)}
-                    />
-                  </div>
-                );
-              })}
             </div>
           ))}
-        </div>
-      </div>
 
-      {editor && (
-        <div className="wp-modal-root" role="dialog" aria-modal>
-          <div className="wp-modal">
-            <h2>{editor.mode === "create" ? "Новое дело" : "Редактировать"}</h2>
-            <label className="wp-field">
-              Текст
-              <input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} placeholder="Например: ужин с родителями" />
-            </label>
-            <div className="wp-row2">
-              <label className="wp-field">
-                День
-                <select value={editor.day_index} onChange={(e) => setEditor({ ...editor, day_index: Number(e.target.value) })}>
-                  {WD.map((w, i) => (
-                    <option key={w} value={i}>
-                      {w}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="wp-field">
-                Начало
-                <input
-                  type="time"
-                  step={900}
-                  value={fmtClock(editor.start_minutes)}
-                  onChange={(e) => {
-                    const [hh, mm] = e.target.value.split(":").map(Number);
-                    setEditor({ ...editor, start_minutes: hh * 60 + mm });
-                  }}
-                />
-              </label>
-            </div>
-            <label className="wp-field">
-              Длительность (ч)
-              <input
-                type="number"
-                min={0.25}
-                step={0.25}
-                value={editor.duration_minutes / 60}
-                onChange={(e) =>
-                  setEditor({ ...editor, duration_minutes: Math.max(SNAP, Math.round(Number(e.target.value) * 60 / SNAP) * SNAP) })
-                }
-              />
-            </label>
-            <label className="wp-field">
-              Напоминание (необязательно)
-              <input
-                type="datetime-local"
-                value={editor.remind_at}
-                onChange={(e) => setEditor({ ...editor, remind_at: e.target.value })}
-              />
-            </label>
-            <div className="wp-actions">
-              {editor.mode === "edit" && (
-                <button type="button" className="wp-btn danger" onClick={() => void deleteEditor()}>
-                  Удалить
-                </button>
-              )}
-              <button type="button" className="wp-btn ghost" onClick={() => setEditor(null)}>
-                Отмена
-              </button>
-              <button type="button" className="wp-btn primary" onClick={() => void saveEditor()}>
-                Сохранить
-              </button>
-            </div>
+          <div className="wp-events-layer" style={{ left: TIME_W }}>
+            {rows.map((raw) => {
+              const e = displayEvent(raw);
+              const top = (e.start_minutes / SNAP) * SLOT_H;
+              const height = Math.max((e.duration_minutes / SNAP) * SLOT_H, SLOT_H);
+              const leftPct = (e.day_index / 7) * 100;
+              const widthPct = (e.day_span / 7) * 100;
+              const mine = myTgId !== null && e.owner_tg_id === myTgId;
+              const isEditing = editingId === e.id;
+              const titleValue = draftTitles[e.id] ?? e.title;
+              return (
+                <article
+                  key={e.id}
+                  className={`wp-block premium ${mine ? "mine" : "theirs"} ${isEditing ? "editing" : ""}`}
+                  style={{ top, height, left: `${leftPct}%`, width: `calc(${widthPct}% - 8px)` }}
+                  onPointerDown={(ev) => beginInteraction(ev, e, "drag")}
+                >
+                  <div className="resize-handle top" onPointerDown={(ev) => beginInteraction(ev, e, "resize-top")} />
+                  <div className="resize-handle right" onPointerDown={(ev) => beginInteraction(ev, e, "resize-right")} />
+                  <div className="resize-handle bottom" onPointerDown={(ev) => beginInteraction(ev, e, "resize-bottom")} />
+
+                  {isEditing ? (
+                    <input
+                      autoFocus
+                      className="wp-inline-input"
+                      value={titleValue}
+                      onChange={(ev) => setDraftTitles((p) => ({ ...p, [e.id]: ev.target.value }))}
+                      onBlur={() => void commitInlineTitle(e)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter") {
+                          ev.preventDefault();
+                          void commitInlineTitle(e);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="wp-title-btn"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        setDraftTitles((p) => ({ ...p, [e.id]: e.title }));
+                        setEditingId(e.id);
+                      }}
+                    >
+                      <div className="wp-block-title">{e.title}</div>
+                      <div className="wp-block-meta">
+                        {fmtClock(e.start_minutes)} · {fmtClock(e.start_minutes + e.duration_minutes)} · {e.day_span} дн.
+                      </div>
+                    </button>
+                  )}
+                </article>
+              );
+            })}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
