@@ -5,6 +5,7 @@
   color: var(--wp-fg);
   font-family: "SF Pro Display", "DM Sans", system-ui, sans-serif;
   background: radial-gradient(120% 60% at 50% 0%, var(--wp-glow), transparent 55%), var(--wp-bg);
+  overscroll-behavior-y: contain;
 }
 
 .wp.theme-dark {
@@ -125,6 +126,8 @@
   flex: 1;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y pan-x;
 }
 
 .wp-grid {
@@ -210,6 +213,7 @@
   right: 0;
   bottom: 0;
   z-index: 10;
+  pointer-events: none;
 }
 
 .wp-block {
@@ -219,6 +223,7 @@
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.22);
   overflow: hidden;
   touch-action: none;
+  pointer-events: auto;
 }
 
 .wp-block.premium.mine {

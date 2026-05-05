@@ -8,6 +8,7 @@ declare global {
       WebApp: {
         ready: () => void;
         expand: () => void;
+        disableVerticalSwipes?: () => void;
         initData: string;
         initDataUnsafe: { user?: { id?: number } };
         themeParams: Record<string, string | undefined>;
@@ -33,6 +34,7 @@ export default function App() {
     if (tg) {
       tg.ready();
       tg.expand();
+      tg.disableVerticalSwipes?.();
       const tp = tg.themeParams;
       const root = document.documentElement;
       if (tp.bg_color) {
