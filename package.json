@@ -3,13 +3,16 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev:web\" \"npm run dev:api\"",
     "dev:web": "vite --host",
     "dev:api": "tsx watch server/index.ts",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview --host",
-    "start": "cross-env NODE_ENV=production node --import tsx server/index.ts"
+    "start": "cross-env NODE_ENV=production node dist-server/index.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
