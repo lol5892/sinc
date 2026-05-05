@@ -222,6 +222,7 @@
 
 .wp-block {
   position: absolute;
+  box-sizing: border-box;
   border-radius: 0.9rem;
   border: 1px solid color-mix(in srgb, var(--wp-line) 75%, transparent);
   box-shadow: none;

@@ -68,6 +68,14 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
+function normalizeToGrid(ev: ApiEvent): ApiEvent {
+  const start = clamp(snapMin(ev.start_minutes), 0, 24 * 60 - SNAP);
+  const dur = clamp(Math.round(ev.duration_minutes / SNAP) * SNAP, SNAP, 24 * 60 - start);
+  const day = clamp(Math.round(ev.day_index), 0, 6);
+  const span = clamp(Math.round(ev.day_span || 1), 1, 7 - day);
+  return { ...ev, day_index: day, day_span: span, start_minutes: start, duration_minutes: dur };
+}
+
 export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   const [monday, setMonday] = useState(() => mondayISO(new Date()));
   const [events, setEvents] = useState<ApiEvent[]>([]);
@@ -125,14 +133,15 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   }, [events, monday]);
 
   const displayEvent = (e: ApiEvent): ApiEvent => {
-    if (!preview || preview.id !== e.id) return e;
-    return {
-      ...e,
-      day_index: preview.day_index ?? e.day_index,
-      day_span: preview.day_span ?? e.day_span,
-      start_minutes: preview.start_minutes ?? e.start_minutes,
-      duration_minutes: preview.duration_minutes ?? e.duration_minutes,
-    };
+    const base = normalizeToGrid(e);
+    if (!preview || preview.id !== e.id) return base;
+    return normalizeToGrid({
+      ...base,
+      day_index: preview.day_index ?? base.day_index,
+      day_span: preview.day_span ?? base.day_span,
+      start_minutes: preview.start_minutes ?? base.start_minutes,
+      duration_minutes: preview.duration_minutes ?? base.duration_minutes,
+    });
   };
 
   const shiftWeek = (delta: number) => {
@@ -420,8 +429,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
           <div className="wp-events-layer" style={{ left: TIME_W }}>
             {rows.map((raw) => {
               const e = displayEvent(raw);
-              const top = (e.start_minutes / SNAP) * SLOT_H;
-              const height = Math.max((e.duration_minutes / SNAP) * SLOT_H, SLOT_H);
+              const top = Math.round((e.start_minutes / SNAP) * SLOT_H);
+              const height = Math.max(Math.round((e.duration_minutes / SNAP) * SLOT_H), Math.round(SLOT_H));
               const leftPct = (e.day_index / 7) * 100;
               const widthPct = (e.day_span / 7) * 100;
               const mine = myTgId !== null && e.owner_tg_id === myTgId;
