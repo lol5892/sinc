@@ -386,15 +386,6 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
             →
           </button>
         </div>
-        <div className="wp-weekbar glass-soft">
-          <div className="wp-weekbar-time" />
-          {dayDates.map((d, i) => (
-            <div key={i} className="wp-weekbar-day">
-              <span className="wp-dn">{d.label}</span>
-              <span className="wp-dd">{d.date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
-            </div>
-          ))}
-        </div>
       </header>
 
       {err && <div className="wp-toast err">{err}</div>}
@@ -402,6 +393,14 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
 
       <div className="wp-scroll">
         <div className="wp-grid" ref={gridRef}>
+          <div className="wp-corner" style={{ width: TIME_W }} />
+          {dayDates.map((d, i) => (
+            <div key={i} className="wp-dhead glass-soft">
+              <span className="wp-dn">{d.label}</span>
+              <span className="wp-dd">{d.date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
+            </div>
+          ))}
+
           <div className="wp-time" style={{ width: TIME_W }}>
             {Array.from({ length: 24 }, (_, h) => (
               <div key={h} className="wp-hour" style={{ height: HOUR_H }}>
