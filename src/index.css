@@ -18,6 +18,9 @@ body {
   min-height: 100dvh;
   background: var(--wp-bg);
   color: var(--wp-fg);
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
 }
 
 #root {

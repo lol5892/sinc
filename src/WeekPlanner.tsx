@@ -106,8 +106,8 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
   const gridRef = useRef<HTMLDivElement>(null);
   const lastTapRef = useRef<{ day: number; min: number; t: number } | null>(null);
-  const lastBlockTapRef = useRef<{ id: string; t: number } | null>(null);
-  const holdDeletedRef = useRef<string | null>(null);
+  const holdHandledRef = useRef<string | null>(null);
+  const suppressClickRef = useRef<string | null>(null);
   const currentUserId = useMemo(() => {
     if (myTgId !== null) return myTgId;
     const n = Number(devUserId);
@@ -178,6 +178,21 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     setMonday(mondayISO(d));
   };
 
+  const openEditorForEvent = (e: ApiEvent) => {
+    setInfoBubble(null);
+    setCommentEditorOpen(false);
+    setEditor({
+      mode: "edit",
+      id: e.id,
+      day_index: e.day_index,
+      day_span: e.day_span,
+      start_minutes: e.start_minutes,
+      duration_minutes: e.duration_minutes,
+      title: e.title,
+      comment: e.comment,
+    });
+  };
+
   const onBackgroundTap = (ev: React.PointerEvent, day: number) => {
     if (ev.target !== ev.currentTarget) return;
     const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -206,17 +221,13 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     const startX = ev.clientX;
     const startY = ev.clientY;
     let moved = false;
-    const timer = window.setTimeout(async () => {
+    const timer = window.setTimeout(() => {
       if (moved || !mine) return;
-      holdDeletedRef.current = e.id;
+      holdHandledRef.current = e.id;
+      suppressClickRef.current = e.id;
       setInteraction(null);
       setPreview(null);
-      try {
-        await api.deleteEvent(e.id, initData, devUserId, devUserName);
-        void load();
-      } catch (err) {
-        setErr(String(err));
-      }
+      openEditorForEvent(e);
     }, 680);
     const onMove = (p: PointerEvent) => {
       if (p.pointerId !== ev.pointerId) return;
@@ -301,8 +312,8 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
     const onUp = async (ev: PointerEvent) => {
       if (ev.pointerId !== interaction.pointerId) return;
-      if (holdDeletedRef.current === interaction.id) {
-        holdDeletedRef.current = null;
+      if (holdHandledRef.current === interaction.id) {
+        holdHandledRef.current = null;
         setInteraction(null);
         setPreview(null);
         return;
@@ -392,24 +403,11 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
   const onBlockTap = (ev: React.MouseEvent, e: ApiEvent) => {
     ev.stopPropagation();
-    const now = Date.now();
-    const last = lastBlockTapRef.current;
-    const isDouble = !!last && last.id === e.id && now - last.t < 340;
-    lastBlockTapRef.current = { id: e.id, t: now };
+    if (suppressClickRef.current === e.id) {
+      suppressClickRef.current = null;
+      return;
+    }
     setInfoBubble({ id: e.id, x: ev.clientX, y: ev.clientY });
-    if (!isDouble || !isMine(e)) return;
-    setInfoBubble(null);
-    setEditor({
-      mode: "edit",
-      id: e.id,
-      day_index: e.day_index,
-      day_span: e.day_span,
-      start_minutes: e.start_minutes,
-      duration_minutes: e.duration_minutes,
-      title: e.title,
-      comment: e.comment,
-    });
-    setCommentEditorOpen(false);
   };
 
   const removeFromEditor = async () => {

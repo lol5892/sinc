@@ -408,6 +408,8 @@
   justify-content: center;
   z-index: 50;
   padding: 0.7rem;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 @media (min-width: 560px) {
@@ -418,6 +420,8 @@
 
 .wp-modal {
   width: min(440px, 100%);
+  max-height: calc(100dvh - 1.4rem);
+  overflow: auto;
   border-radius: 1rem;
   background: var(--wp-panel);
   border: 1px solid var(--wp-line);
@@ -445,8 +449,9 @@
   background: color-mix(in srgb, var(--wp-bg) 86%, var(--wp-panel));
   color: inherit;
   border-radius: 0.55rem;
-  padding: 0.45rem 0.55rem;
+  padding: 0.58rem 0.62rem;
   font: inherit;
+  font-size: 16px;
 }
 
 .wp-field textarea {
@@ -497,10 +502,14 @@
   justify-content: center;
   background: rgba(0, 0, 0, 0.24);
   padding: 0.7rem;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .wp-sheet {
   width: min(460px, 100%);
+  max-height: calc(100dvh - 1.4rem);
+  overflow: auto;
   border-radius: 1.1rem 1.1rem 0.8rem 0.8rem;
   background: var(--wp-panel);
   border: 1px solid var(--wp-line);
