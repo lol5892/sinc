@@ -28,6 +28,13 @@ const ALLOWED = new Set(
 /** Для отправки сообщений из HTTP (новое дело и т.д.). */
 let botForNotify: Telegraf | null = null;
 
+type AuthUser = { id: number; name: string };
+
+function displayUserName(user: { id: number; first_name?: string; last_name?: string; username?: string }): string {
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  return fullName || (user.username ? `@${user.username}` : `Пользователь ${user.id}`);
+}
+
 async function notifyOthersInFamily(creatorId: number, text: string) {
   if (!botForNotify || ALLOWED.size < 2) return;
   for (const uid of ALLOWED) {
@@ -48,10 +55,17 @@ function assertAllowed(userId: number) {
   if (!ALLOWED.has(userId)) throw new Error("forbidden");
 }
 
-function authUser(req: express.Request): number {
+function authUser(req: express.Request): AuthUser {
   if (NODE_ENV === "development") {
     const dev = req.headers["x-dev-user-id"];
-    if (typeof dev === "string" && ALLOWED.has(Number(dev))) return Number(dev);
+    if (typeof dev === "string" && ALLOWED.has(Number(dev))) {
+      const id = Number(dev);
+      const devName = req.headers["x-dev-user-name"];
+      return {
+        id,
+        name: typeof devName === "string" && devName.trim() ? devName.trim().slice(0, 120) : `Пользователь ${id}`,
+      };
+    }
   }
   const h = req.headers.authorization;
   if (!h?.startsWith("tma ")) throw new Error("unauthorized");
@@ -59,7 +73,7 @@ function authUser(req: express.Request): number {
   const v = parseAndValidateInitData(initData, BOT_TOKEN);
   if (!v) throw new Error("unauthorized");
   assertAllowed(v.userId);
-  return v.userId;
+  return { id: v.userId, name: displayUserName(v.user) };
 }
 
 function mondayISO(d: Date): string {
@@ -102,9 +116,9 @@ app.get("/api/week", (req, res) => {
 });
 
 app.post("/api/events", (req, res) => {
-  let userId: number;
+  let user: AuthUser;
   try {
-    userId = authUser(req);
+    user = authUser(req);
   } catch (e) {
     const m = (e as Error).message;
     if (m === "forbidden") return res.status(403).json({ error: "forbidden" });
@@ -140,28 +154,30 @@ app.post("/api/events", (req, res) => {
     start_minutes: b.start_minutes,
     duration_minutes: b.duration_minutes,
     title: titleTrim,
-    owner_tg_id: userId,
+    owner_tg_id: user.id,
+    owner_name: user.name,
     remind_at: b.remind_at && b.remind_at.length > 0 ? b.remind_at : null,
   });
   const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   const hh = String(Math.floor(b.start_minutes / 60)).padStart(2, "0");
   const mm = String(b.start_minutes % 60).padStart(2, "0");
   const msg = `Новое дело в общем плане:\n«${titleTrim}»\n${WD[b.day_index]}, ${hh}:${mm}`;
-  void notifyOthersInFamily(userId, msg);
+  void notifyOthersInFamily(user.id, msg);
   return res.json({ id });
 });
 
 app.patch("/api/events/:id", (req, res) => {
-  let userId: number;
+  let user: AuthUser;
   try {
-    userId = authUser(req);
+    user = authUser(req);
   } catch (e) {
     const m = (e as Error).message;
     if (m === "forbidden") return res.status(403).json({ error: "forbidden" });
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  if (!db.eventExists(id)) return res.status(404).json({ error: "not_found" });
+  const event = db.getEvent(id);
+  if (!event) return res.status(404).json({ error: "not_found" });
 
   const b = req.body as Partial<{
     day_index: number;
@@ -171,6 +187,14 @@ app.patch("/api/events/:id", (req, res) => {
     title: string;
     remind_at: string | null;
   }>;
+  if (event.owner_tg_id !== user.id) {
+    const triesOwnerOnlyChange =
+      "title" in b ||
+      "remind_at" in b ||
+      (typeof b.day_span === "number" && b.day_span !== event.day_span) ||
+      (typeof b.duration_minutes === "number" && b.duration_minutes !== event.duration_minutes);
+    if (triesOwnerOnlyChange) return res.status(403).json({ error: "owner_only" });
+  }
   const patch: Parameters<typeof db.updateEvent>[1] = {};
   if (typeof b.day_index === "number" && b.day_index >= 0 && b.day_index <= 6) patch.day_index = b.day_index;
   if (typeof b.day_span === "number" && b.day_span >= 1 && b.day_span <= 7) patch.day_span = b.day_span;
@@ -187,16 +211,18 @@ app.patch("/api/events/:id", (req, res) => {
 });
 
 app.delete("/api/events/:id", (req, res) => {
-  let userId: number;
+  let user: AuthUser;
   try {
-    userId = authUser(req);
+    user = authUser(req);
   } catch (e) {
     const m = (e as Error).message;
     if (m === "forbidden") return res.status(403).json({ error: "forbidden" });
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  if (!db.eventExists(id)) return res.status(404).json({ error: "not_found" });
+  const event = db.getEvent(id);
+  if (!event) return res.status(404).json({ error: "not_found" });
+  if (event.owner_tg_id !== user.id) return res.status(403).json({ error: "owner_only" });
   db.deleteEvent(id);
   return res.json({ ok: true });
 });

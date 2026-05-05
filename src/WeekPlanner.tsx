@@ -10,7 +10,7 @@ const DAY_H = 24 * HOUR_H;
 const TIME_W = 58;
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
-type Props = { initData: string; devUserId?: string; myTgId: number | null };
+type Props = { initData: string; devUserId?: string; devUserName?: string; myTgId: number | null };
 type ThemeMode = "light" | "dark";
 
 type Interaction = {
@@ -76,7 +76,7 @@ function normalizeToGrid(ev: ApiEvent): ApiEvent {
   return { ...ev, day_index: day, day_span: span, start_minutes: start, duration_minutes: dur };
 }
 
-export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
+export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }: Props) {
   const [monday, setMonday] = useState(() => mondayISO(new Date()));
   const [events, setEvents] = useState<ApiEvent[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -101,6 +101,15 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   const lastTapRef = useRef<{ day: number; min: number; t: number } | null>(null);
   const lastBlockTapRef = useRef<{ id: string; t: number } | null>(null);
   const holdDeletedRef = useRef<string | null>(null);
+  const currentUserId = useMemo(() => {
+    if (myTgId !== null) return myTgId;
+    const n = Number(devUserId);
+    return Number.isFinite(n) ? n : null;
+  }, [myTgId, devUserId]);
+  const isMine = useCallback(
+    (e: Pick<ApiEvent, "owner_tg_id">) => currentUserId !== null && e.owner_tg_id === currentUserId,
+    [currentUserId],
+  );
 
   useEffect(() => {
     const id = window.setInterval(() => setTheme(hourTheme()), 60_000);
@@ -111,14 +120,14 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     setErr(null);
     setLoading(true);
     try {
-      const r = await api.fetchWeek(monday, initData, devUserId);
+      const r = await api.fetchWeek(monday, initData, devUserId, devUserName);
       setEvents(r.events.map((e) => ({ ...e, day_span: e.day_span ?? 1 })));
     } catch (e) {
       setErr(String(e));
     } finally {
       setLoading(false);
     }
-  }, [monday, initData, devUserId]);
+  }, [monday, initData, devUserId, devUserName]);
 
   useEffect(() => {
     void load();
@@ -171,16 +180,17 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   };
 
   const onBlockPointerDown = (ev: React.PointerEvent, e: ApiEvent) => {
+    const mine = isMine(e);
     const startX = ev.clientX;
     const startY = ev.clientY;
     let moved = false;
     const timer = window.setTimeout(async () => {
-      if (moved) return;
+      if (moved || !mine) return;
       holdDeletedRef.current = e.id;
       setInteraction(null);
       setPreview(null);
       try {
-        await api.deleteEvent(e.id, initData, devUserId);
+        await api.deleteEvent(e.id, initData, devUserId, devUserName);
         void load();
       } catch (err) {
         setErr(String(err));
@@ -241,8 +251,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
       const dyMin = snapMin(((ev.clientY - interaction.y0) / SLOT_H) * SNAP);
 
       if (interaction.mode === "drag") {
-        const day = clamp(interaction.day0 + dxDays, 0, 6);
-        const span = clamp(interaction.span0, 1, 7 - day);
+        const span = interaction.span0;
+        const day = clamp(interaction.day0 + dxDays, 0, 7 - span);
         const start = clamp(interaction.start0 + dyMin, 0, 24 * 60 - interaction.dur0);
         setPreview({ id: interaction.id, day_index: day, day_span: span, start_minutes: start, duration_minutes: interaction.dur0 });
         return;
@@ -280,16 +290,24 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
       setPreview(null);
       if (!p || p.id !== interaction.id) return;
       try {
+        const patch =
+          interaction.mode === "drag"
+            ? {
+                day_index: p.day_index,
+                start_minutes: p.start_minutes,
+              }
+            : {
+                day_index: p.day_index,
+                day_span: p.day_span,
+                start_minutes: p.start_minutes,
+                duration_minutes: p.duration_minutes,
+              };
         await api.patchEvent(
           interaction.id,
-          {
-            day_index: p.day_index,
-            day_span: p.day_span,
-            start_minutes: p.start_minutes,
-            duration_minutes: p.duration_minutes,
-          },
+          patch,
           initData,
           devUserId,
+          devUserName,
         );
         void load();
       } catch (e) {
@@ -305,7 +323,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [interaction, preview, initData, devUserId, load]);
+  }, [interaction, preview, initData, devUserId, devUserName, load]);
 
   const saveEditor = async () => {
     if (!editor) return;
@@ -323,6 +341,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
           },
           initData,
           devUserId,
+          devUserName,
         );
       } else if (editor.id) {
         await api.patchEvent(
@@ -336,6 +355,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
           },
           initData,
           devUserId,
+          devUserName,
         );
       }
       setEditor(null);
@@ -351,7 +371,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     const last = lastBlockTapRef.current;
     const isDouble = !!last && last.id === e.id && now - last.t < 340;
     lastBlockTapRef.current = { id: e.id, t: now };
-    if (!isDouble) return;
+    if (!isDouble || !isMine(e)) return;
     setEditor({
       mode: "edit",
       id: e.id,
@@ -366,7 +386,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   const removeFromEditor = async () => {
     if (!editor?.id) return;
     try {
-      await api.deleteEvent(editor.id, initData, devUserId);
+      await api.deleteEvent(editor.id, initData, devUserId, devUserName);
       setEditor(null);
       void load();
     } catch (e) {
@@ -433,7 +453,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
               const height = Math.max(Math.round((e.duration_minutes / SNAP) * SLOT_H), Math.round(SLOT_H));
               const leftPct = (e.day_index / 7) * 100;
               const widthPct = (e.day_span / 7) * 100;
-              const mine = myTgId !== null && e.owner_tg_id === myTgId;
+              const mine = isMine(e);
               return (
                 <article
                   key={e.id}
@@ -442,12 +462,17 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                   onPointerDown={(ev) => onBlockPointerDown(ev, e)}
                   onClick={(ev) => onBlockTap(ev, e)}
                 >
-                  <div className="resize-handle top" onPointerDown={(ev) => beginInteraction(ev, e, "resize-top")} />
-                  <div className="resize-handle right" onPointerDown={(ev) => beginInteraction(ev, e, "resize-right")} />
-                  <div className="resize-handle bottom" onPointerDown={(ev) => beginInteraction(ev, e, "resize-bottom")} />
+                  {mine && (
+                    <>
+                      <div className="resize-handle top" onPointerDown={(ev) => beginInteraction(ev, e, "resize-top")} />
+                      <div className="resize-handle right" onPointerDown={(ev) => beginInteraction(ev, e, "resize-right")} />
+                      <div className="resize-handle bottom" onPointerDown={(ev) => beginInteraction(ev, e, "resize-bottom")} />
+                    </>
+                  )}
 
                   <div className="wp-title-btn">
                     <div className="wp-block-title">{e.title}</div>
+                    <div className="wp-block-owner">Добавил: {e.owner_name}</div>
                     <div className="wp-block-meta">
                       {fmtClock(e.start_minutes)} · {fmtClock(e.start_minutes + e.duration_minutes)} · {e.day_span} дн.
                     </div>
@@ -529,7 +554,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
               </label>
             </div>
             <div className="wp-actions">
-              {editor.mode === "edit" && (
+              {editor.mode === "edit" && events.some((event) => event.id === editor.id && isMine(event)) && (
                 <button type="button" className="wp-btn danger" onClick={() => void removeFromEditor()}>
                   Удалить
                 </button>

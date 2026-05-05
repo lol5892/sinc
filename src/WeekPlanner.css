@@ -271,6 +271,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+.wp-block-owner {
+  margin-top: 0.15rem;
+  font-size: 0.64rem;
+  color: color-mix(in srgb, var(--wp-muted) 86%, var(--wp-fg));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .wp-inline-input {
   width: 100%;
   height: 100%;

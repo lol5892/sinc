@@ -7,6 +7,7 @@ export type ApiEvent = {
   duration_minutes: number;
   title: string;
   owner_tg_id: number;
+  owner_name: string;
   remind_at: string | null;
   reminder_sent: number;
 };

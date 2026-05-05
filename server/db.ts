@@ -11,6 +11,7 @@ export type EventRow = {
   duration_minutes: number;
   title: string;
   owner_tg_id: number;
+  owner_name: string;
   remind_at: string | null;
   reminder_sent: number;
 };
@@ -33,6 +34,10 @@ function readDisk(): FileStore {
       events: p.events.map((e) => ({
         ...e,
         day_span: Number.isFinite((e as Partial<EventRow>).day_span) ? (e as Partial<EventRow>).day_span! : 1,
+        owner_name:
+          typeof (e as Partial<EventRow>).owner_name === "string" && (e as Partial<EventRow>).owner_name!.trim()
+            ? (e as Partial<EventRow>).owner_name!.trim()
+            : `Пользователь ${e.owner_tg_id}`,
       })),
     };
   } catch {
@@ -55,8 +60,8 @@ export function initStore() {
   getStore();
 }
 
-export function eventExists(id: string): boolean {
-  return getStore().events.some((e) => e.id === id);
+export function getEvent(id: string): EventRow | null {
+  return getStore().events.find((e) => e.id === id) ?? null;
 }
 
 export function listEventsForWeek(weekMonday: string): EventRow[] {
@@ -69,6 +74,7 @@ export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_se
   const s = getStore();
   s.events.push({
     ...row,
+    owner_name: row.owner_name.trim() || `Пользователь ${row.owner_tg_id}`,
     remind_at: row.remind_at ?? null,
     reminder_sent: row.reminder_sent ?? 0,
   });
