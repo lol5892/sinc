@@ -15,6 +15,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
 const WEB_APP_URL = (process.env.WEB_APP_URL ?? "").replace(/\/$/, "");
 const PORT_RAW = Number(process.env.PORT);
 const PORT = Number.isInteger(PORT_RAW) && PORT_RAW > 0 && PORT_RAW <= 65535 ? PORT_RAW : 3001;
+const HOST = process.env.HOST || "0.0.0.0";
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const ALLOWED = new Set(
   (process.env.TELEGRAM_ALLOWED_IDS ?? "")
@@ -276,8 +277,8 @@ async function main() {
   });
 
   // Сначала HTTP — иначе при ошибке Telegram порт не откроется.
-  app.listen(PORT, () => {
-    console.log(`API + статика: порт ${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`API + статика: http://${HOST}:${PORT}`);
     if (NODE_ENV === "development") {
       console.log("Dev: Vite на :5173, прокси /api → этот сервер. x-dev-user-id для браузера.");
     }
