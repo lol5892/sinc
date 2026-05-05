@@ -27,6 +27,8 @@ export async function createEvent(
     start_minutes: number;
     duration_minutes: number;
     title: string;
+    comment?: string;
+    assignee: "tatyana" | "anton";
     remind_at?: string | null;
   },
   initData: string,
@@ -49,6 +51,8 @@ export async function patchEvent(
     start_minutes: number;
     duration_minutes: number;
     title: string;
+    comment: string;
+    assignee: "tatyana" | "anton";
     remind_at: string | null;
   }>,
   initData: string,

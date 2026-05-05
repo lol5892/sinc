@@ -9,6 +9,15 @@ const SLOT_H = HOUR_H / 2;
 const DAY_H = 24 * HOUR_H;
 const TIME_W = 58;
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const ASSIGNEE_LABEL: Record<"tatyana" | "anton", string> = {
+  tatyana: "Татьяна",
+  anton: "Антон",
+};
+const ANTON_TG_ID = 296014099;
+
+function ownerLabel(ownerTgId: number): string {
+  return ownerTgId === ANTON_TG_ID ? "Антон" : "Татьяна";
+}
 
 type Props = { initData: string; devUserId?: string; myTgId: number | null };
 type ThemeMode = "light" | "dark";
@@ -76,7 +85,7 @@ function normalizeToGrid(ev: ApiEvent): ApiEvent {
   return { ...ev, day_index: day, day_span: span, start_minutes: start, duration_minutes: dur };
 }
 
-export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
+export default function WeekPlanner({ initData, devUserId, myTgId: _myTgId }: Props) {
   const [monday, setMonday] = useState(() => mondayISO(new Date()));
   const [events, setEvents] = useState<ApiEvent[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -94,6 +103,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
         start_minutes: number;
         duration_minutes: number;
         title: string;
+        comment: string;
+        assignee: "tatyana" | "anton";
       }
   >(null);
 
@@ -112,7 +123,13 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     setLoading(true);
     try {
       const r = await api.fetchWeek(monday, initData, devUserId);
-      setEvents(r.events.map((e) => ({ ...e, day_span: e.day_span ?? 1 })));
+      setEvents(
+        r.events.map((e) => ({
+          ...e,
+          day_span: e.day_span ?? 1,
+          assignee: e.assignee === "tatyana" ? "tatyana" : "anton",
+        })),
+      );
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -167,6 +184,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
       start_minutes: min,
       duration_minutes: 60,
       title: "",
+      comment: "",
+      assignee: "anton",
     });
   };
 
@@ -320,6 +339,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
             start_minutes: editor.start_minutes,
             duration_minutes: editor.duration_minutes,
             title,
+            comment: editor.comment.trim(),
+            assignee: editor.assignee,
           },
           initData,
           devUserId,
@@ -333,6 +354,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
             start_minutes: editor.start_minutes,
             duration_minutes: editor.duration_minutes,
             title,
+            comment: editor.comment.trim(),
+            assignee: editor.assignee,
           },
           initData,
           devUserId,
@@ -360,6 +383,8 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
       start_minutes: e.start_minutes,
       duration_minutes: e.duration_minutes,
       title: e.title,
+      comment: e.comment ?? "",
+      assignee: e.assignee,
     });
   };
 
@@ -433,11 +458,10 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
               const height = Math.max(Math.round((e.duration_minutes / SNAP) * SLOT_H), Math.round(SLOT_H));
               const leftPct = (e.day_index / 7) * 100;
               const widthPct = (e.day_span / 7) * 100;
-              const mine = myTgId !== null && e.owner_tg_id === myTgId;
               return (
                 <article
                   key={e.id}
-                  className={`wp-block premium ${mine ? "mine" : "theirs"}`}
+                  className={`wp-block premium assignee-${e.assignee}`}
                   style={{ top, height, left: `${leftPct}%`, width: `${widthPct}%` }}
                   onPointerDown={(ev) => onBlockPointerDown(ev, e)}
                   onClick={(ev) => onBlockTap(ev, e)}
@@ -451,6 +475,10 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                     <div className="wp-block-meta">
                       {fmtClock(e.start_minutes)} · {fmtClock(e.start_minutes + e.duration_minutes)} · {e.day_span} дн.
                     </div>
+                    <div className="wp-block-meta">
+                      Для: {ASSIGNEE_LABEL[e.assignee]} · От: {ownerLabel(e.owner_tg_id)}
+                    </div>
+                    {e.comment && <div className="wp-block-meta">Комментарий: {e.comment}</div>}
                   </div>
                 </article>
               );
@@ -469,6 +497,14 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                 value={editor.title}
                 onChange={(e) => setEditor({ ...editor, title: e.target.value })}
                 placeholder="Например: Помыть посуду"
+              />
+            </label>
+            <label className="wp-field">
+              Комментарий
+              <input
+                value={editor.comment}
+                onChange={(e) => setEditor({ ...editor, comment: e.target.value })}
+                placeholder="Например: купить по акции"
               />
             </label>
             <div className="wp-row2">
@@ -498,6 +534,16 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                 />
               </label>
             </div>
+            <label className="wp-field">
+              Для кого
+              <select
+                value={editor.assignee}
+                onChange={(e) => setEditor({ ...editor, assignee: e.target.value as "tatyana" | "anton" })}
+              >
+                <option value="tatyana">Татьяна</option>
+                <option value="anton">Антон</option>
+              </select>
+            </label>
             <div className="wp-row2">
               <label className="wp-field">
                 Длительность (ч)
