@@ -100,8 +100,7 @@ export function listEventsForWeek(weekMonday: string): EventRow[] {
     .events.filter((e) => {
       if (e.week_monday !== weekMonday) return false;
       if (e.declined_at) return false;
-      if (!e.confirmation_required) return true;
-      return Boolean(e.confirmed_at);
+      return true;
     })
     .sort((a, b) => a.day_index - b.day_index || a.start_minutes - b.start_minutes);
 }

@@ -391,13 +391,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
   return (
     <div className={`wp ${theme === "dark" ? "theme-dark" : "theme-light"}`} onPointerDown={() => setInfoBubble(null)}>
       <header className="wp-head glass">
-        <div className="wp-brand">
-          <span className="wp-logo">◍</span>
-          <div>
-            <div className="wp-title">Week Duo Planner</div>
-            <div className="wp-sub">Двойной тап создаёт блок на 1 час • шаг сетки 30 минут</div>
-          </div>
-        </div>
         <div className="wp-nav">
           <button type="button" className="wp-btn ghost" onClick={() => shiftWeek(-1)}>
             ←

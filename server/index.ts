@@ -143,14 +143,17 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.get("/api/week", (req, res) => {
+  let user: AuthUser;
   try {
-    authUser(req);
+    user = authUser(req);
   } catch {
     return res.status(401).json({ error: "unauthorized" });
   }
   const mon = typeof req.query.monday === "string" ? req.query.monday : mondayISO(new Date());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(mon)) return res.status(400).json({ error: "bad_monday" });
-  const events = db.listEventsForWeek(mon);
+  const events = db
+    .listEventsForWeek(mon)
+    .filter((event) => event.owner_tg_id === user.id || !event.confirmation_required || Boolean(event.confirmed_at));
   return res.json({ monday: mon, events });
 });
 
@@ -399,12 +402,9 @@ async function main() {
         await ctx.answerCbQuery("Дело не найдено").catch(() => {});
         return;
       }
-      db.updateEvent(eventId, {
-        declined_at: new Date().toISOString(),
-        declined_by_tg_id: userId,
-      });
+      db.deleteEvent(eventId);
       await ctx.answerCbQuery("Отказано").catch(() => {});
-      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n❌ Отказано`;
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n❌ Отказано и удалено`;
       await ctx.editMessageText(text).catch(() => {});
     });
 
@@ -426,6 +426,18 @@ async function main() {
         );
       }
     });
+
+    if (WEB_APP_URL) {
+      await bot.telegram
+        .setChatMenuButton({
+          menu_button: {
+            type: "web_app",
+            text: "Start",
+            web_app: { url: WEB_APP_URL },
+          },
+        })
+        .catch((e) => console.error("Не удалось установить кнопку меню Start", e));
+    }
   } else {
     botForNotify = null;
     console.error(
