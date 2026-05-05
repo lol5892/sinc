@@ -43,18 +43,23 @@ function phoneForUserName(name: string): string {
   return "8960-008-48-43";
 }
 
-function callButtonText(name: string): string {
-  const phone = phoneForUserName(name);
-  const normalized = name.toLocaleLowerCase("ru-RU");
-  const label =
-    normalized.includes("татьян") || normalized.includes("tatiana") || normalized.includes("tatyana")
-      ? "Татьяне"
-      : "Антону";
-  return `Позвонить ${label}: ${phone}`;
-}
-
 function telHref(phone: string): string {
   return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
+function eventCallUrl(eventId: string): string {
+  if (!WEB_APP_URL) return telHref("");
+  return `${WEB_APP_URL}/call/${encodeURIComponent(eventId)}`;
+}
+
+function confirmationKeyboard(eventId: string, mode: "initial" | "after-call" = "initial") {
+  const rows = [[{ text: "Подтвердить", callback_data: `confirm:${eventId}` }]];
+  rows.push(
+    mode === "initial"
+      ? [{ text: "Позвонить", url: eventCallUrl(eventId) }]
+      : [{ text: "Отказаться", callback_data: `decline:${eventId}` }],
+  );
+  return { inline_keyboard: rows };
 }
 
 async function notifyOthersInFamily(creatorId: number, text: string) {
@@ -71,18 +76,16 @@ async function notifyOthersInFamily(creatorId: number, text: string) {
 
 async function requestConfirmationFromOthers(creator: AuthUser, eventId: string, title: string, when: string) {
   if (!botForNotify || ALLOWED.size < 2) return;
-  const phone = phoneForUserName(creator.name);
   const text = `Нужно подтверждение дела:\n«${title}»\n${when}\nДобавил: ${creator.name}`;
   for (const uid of ALLOWED) {
     if (uid === creator.id) continue;
     try {
-      await botForNotify.telegram.sendMessage(uid, text, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "Подтвердить", callback_data: `confirm:${eventId}` }],
-            [{ text: callButtonText(creator.name), url: telHref(phone) }],
-          ],
-        },
+      const message = await botForNotify.telegram.sendMessage(uid, text, {
+        reply_markup: confirmationKeyboard(eventId),
+      });
+      db.updateEvent(eventId, {
+        confirmation_message_chat_id: message.chat.id,
+        confirmation_message_id: message.message_id,
       });
     } catch (e) {
       console.error("Запрос подтверждения не дошёл до", uid, e);
@@ -146,6 +149,27 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/call/:id", (req, res) => {
+  const event = db.getEvent(req.params.id);
+  if (!event) return res.status(404).send("Дело не найдено");
+  const now = new Date().toISOString();
+  db.updateEvent(event.id, {
+    call_clicked_at: now,
+    call_clicked_by_tg_id: null,
+  });
+  if (botForNotify && event.confirmation_message_chat_id && event.confirmation_message_id) {
+    void botForNotify.telegram
+      .editMessageReplyMarkup(
+        event.confirmation_message_chat_id,
+        event.confirmation_message_id,
+        undefined,
+        confirmationKeyboard(event.id, "after-call"),
+      )
+      .catch((e) => console.error("Не удалось заменить кнопку звонка", e));
+  }
+  return res.redirect(telHref(phoneForUserName(event.owner_name)));
+});
+
 app.get("/api/week", (req, res) => {
   try {
     authUser(req);
@@ -201,9 +225,15 @@ app.post("/api/events", (req, res) => {
     duration_minutes: b.duration_minutes,
     title: titleTrim,
     comment: commentTrim,
-    confirmation_required: b.confirmation_required === true,
+    confirmation_required: true,
     confirmed_at: null,
     confirmed_by_tg_id: null,
+    declined_at: null,
+    declined_by_tg_id: null,
+    call_clicked_at: null,
+    call_clicked_by_tg_id: null,
+    confirmation_message_chat_id: null,
+    confirmation_message_id: null,
     owner_tg_id: user.id,
     owner_name: user.name,
     remind_at: b.remind_at && b.remind_at.length > 0 ? b.remind_at : null,
@@ -213,9 +243,7 @@ app.post("/api/events", (req, res) => {
   const mm = String(b.start_minutes % 60).padStart(2, "0");
   const msg = `Новое дело в общем плане:\n«${titleTrim}»\n${WD[b.day_index]}, ${hh}:${mm}`;
   void notifyOthersInFamily(user.id, msg);
-  if (b.confirmation_required === true) {
-    void requestConfirmationFromOthers(user, id, titleTrim, `${WD[b.day_index]}, ${hh}:${mm}`);
-  }
+  void requestConfirmationFromOthers(user, id, titleTrim, `${WD[b.day_index]}, ${hh}:${mm}`);
   return res.json({ id });
 });
 
@@ -359,11 +387,28 @@ async function main() {
       });
       await ctx.answerCbQuery("Подтверждено").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
-      await ctx.editMessageText(text, {
-        reply_markup: {
-          inline_keyboard: [[{ text: callButtonText(event.owner_name), url: telHref(phoneForUserName(event.owner_name)) }]],
-        },
-      }).catch(() => {});
+      await ctx.editMessageText(text).catch(() => {});
+    });
+
+    bot.action(/^decline:(.+)$/, async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.answerCbQuery("Нет доступа").catch(() => {});
+        return;
+      }
+      const eventId = ctx.match[1];
+      const event = db.getEvent(eventId);
+      if (!event) {
+        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
+        return;
+      }
+      db.updateEvent(eventId, {
+        declined_at: new Date().toISOString(),
+        declined_by_tg_id: userId,
+      });
+      await ctx.answerCbQuery("Отказано").catch(() => {});
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n❌ Отказано`;
+      await ctx.editMessageText(text).catch(() => {});
     });
 
     bot.start(async (ctx) => {

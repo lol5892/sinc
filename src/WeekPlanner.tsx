@@ -37,8 +37,6 @@ type EditorState = {
   duration_minutes: number;
   title: string;
   comment: string;
-  confirmation_required: boolean;
-  confirmed_at: string | null;
 };
 
 function shortComment(comment: string): string {
@@ -195,8 +193,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       duration_minutes: e.duration_minutes,
       title: e.title,
       comment: e.comment,
-      confirmation_required: e.confirmation_required,
-      confirmed_at: e.confirmed_at,
     });
   };
 
@@ -218,8 +214,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       duration_minutes: 60,
       title: "",
       comment: "",
-      confirmation_required: false,
-      confirmed_at: null,
     });
     setCommentEditorOpen(false);
     setInfoBubble(null);
@@ -348,7 +342,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             duration_minutes: editor.duration_minutes,
             title,
             comment: editor.comment,
-            confirmation_required: editor.confirmation_required,
           },
           initData,
           devUserId,
@@ -363,7 +356,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
               duration_minutes: editor.duration_minutes,
               title,
               comment: editor.comment,
-              confirmation_required: editor.confirmation_required,
             }
           : {
               day_index: editor.day_index,
@@ -580,20 +572,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                 <div className="wp-comment-preview">
                   {editor.comment.trim() ? editor.comment.trim() : "Комментарий пока не добавлен"}
                 </div>
-                <label className="wp-check">
-                  <input
-                    type="checkbox"
-                    checked={editor.confirmation_required}
-                    onChange={(e) =>
-                      setEditor({
-                        ...editor,
-                        confirmation_required: e.target.checked,
-                        confirmed_at: e.target.checked ? editor.confirmed_at : null,
-                      })
-                    }
-                  />
-                  <span>Запросить подтверждение у второго пользователя</span>
-                </label>
               </>
             )}
             <div className="wp-actions">
