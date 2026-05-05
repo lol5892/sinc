@@ -13,7 +13,8 @@ dotenv.config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
 const WEB_APP_URL = (process.env.WEB_APP_URL ?? "").replace(/\/$/, "");
-const PORT = Number(process.env.PORT ?? 3001);
+const PORT_RAW = Number(process.env.PORT);
+const PORT = Number.isInteger(PORT_RAW) && PORT_RAW > 0 && PORT_RAW <= 65535 ? PORT_RAW : 3001;
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const ALLOWED = new Set(
   (process.env.TELEGRAM_ALLOWED_IDS ?? "")
