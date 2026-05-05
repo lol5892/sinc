@@ -30,6 +30,7 @@ export async function createEvent(
     duration_minutes: number;
     title: string;
     comment?: string | null;
+    confirmation_required?: boolean;
     remind_at?: string | null;
   },
   initData: string,
@@ -54,6 +55,7 @@ export async function patchEvent(
     duration_minutes: number;
     title: string;
     comment: string | null;
+    confirmation_required: boolean;
     remind_at: string | null;
   }>,
   initData: string,

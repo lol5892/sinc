@@ -35,6 +35,18 @@ function displayUserName(user: { id: number; first_name?: string; last_name?: st
   return fullName || (user.username ? `@${user.username}` : `Пользователь ${user.id}`);
 }
 
+function phoneForUserName(name: string): string {
+  const normalized = name.toLocaleLowerCase("ru-RU");
+  if (normalized.includes("татьян") || normalized.includes("tatiana") || normalized.includes("tatyana")) {
+    return "8901-485-6774";
+  }
+  return "8960-008-48-43";
+}
+
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
+}
+
 async function notifyOthersInFamily(creatorId: number, text: string) {
   if (!botForNotify || ALLOWED.size < 2) return;
   for (const uid of ALLOWED) {
@@ -43,6 +55,27 @@ async function notifyOthersInFamily(creatorId: number, text: string) {
       await botForNotify.telegram.sendMessage(uid, text);
     } catch (e) {
       console.error("Уведомление не дошло до", uid, e);
+    }
+  }
+}
+
+async function requestConfirmationFromOthers(creator: AuthUser, eventId: string, title: string, when: string) {
+  if (!botForNotify || ALLOWED.size < 2) return;
+  const phone = phoneForUserName(creator.name);
+  const text = `Нужно подтверждение дела:\n«${title}»\n${when}\nДобавил: ${creator.name}`;
+  for (const uid of ALLOWED) {
+    if (uid === creator.id) continue;
+    try {
+      await botForNotify.telegram.sendMessage(uid, text, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Подтвердить", callback_data: `confirm:${eventId}` }],
+            [{ text: `Позвонить ${phone}`, url: telHref(phone) }],
+          ],
+        },
+      });
+    } catch (e) {
+      console.error("Запрос подтверждения не дошёл до", uid, e);
     }
   }
 }
@@ -132,6 +165,7 @@ app.post("/api/events", (req, res) => {
     duration_minutes?: number;
     title?: string;
     comment?: string | null;
+    confirmation_required?: boolean;
     remind_at?: string | null;
   };
   if (!b.week_monday || !/^\d{4}-\d{2}-\d{2}$/.test(b.week_monday))
@@ -157,6 +191,9 @@ app.post("/api/events", (req, res) => {
     duration_minutes: b.duration_minutes,
     title: titleTrim,
     comment: commentTrim,
+    confirmation_required: b.confirmation_required === true,
+    confirmed_at: null,
+    confirmed_by_tg_id: null,
     owner_tg_id: user.id,
     owner_name: user.name,
     remind_at: b.remind_at && b.remind_at.length > 0 ? b.remind_at : null,
@@ -166,6 +203,9 @@ app.post("/api/events", (req, res) => {
   const mm = String(b.start_minutes % 60).padStart(2, "0");
   const msg = `Новое дело в общем плане:\n«${titleTrim}»\n${WD[b.day_index]}, ${hh}:${mm}`;
   void notifyOthersInFamily(user.id, msg);
+  if (b.confirmation_required === true) {
+    void requestConfirmationFromOthers(user, id, titleTrim, `${WD[b.day_index]}, ${hh}:${mm}`);
+  }
   return res.json({ id });
 });
 
@@ -189,12 +229,14 @@ app.patch("/api/events/:id", (req, res) => {
     duration_minutes: number;
     title: string;
     comment: string | null;
+    confirmation_required: boolean;
     remind_at: string | null;
   }>;
   if (event.owner_tg_id !== user.id) {
     const triesOwnerOnlyChange =
       "title" in b ||
       "comment" in b ||
+      "confirmation_required" in b ||
       "remind_at" in b ||
       (typeof b.day_span === "number" && b.day_span !== event.day_span) ||
       (typeof b.duration_minutes === "number" && b.duration_minutes !== event.duration_minutes);
@@ -209,6 +251,13 @@ app.patch("/api/events/:id", (req, res) => {
     patch.duration_minutes = b.duration_minutes;
   if (typeof b.title === "string" && b.title.trim()) patch.title = b.title.trim().slice(0, 500);
   if ("comment" in b) patch.comment = b.comment == null ? "" : String(b.comment).trim().slice(0, 1000);
+  if ("confirmation_required" in b) {
+    patch.confirmation_required = b.confirmation_required === true;
+    if (patch.confirmation_required === false) {
+      patch.confirmed_at = null;
+      patch.confirmed_by_tg_id = null;
+    }
+  }
   if ("remind_at" in b) patch.remind_at = b.remind_at && String(b.remind_at).length ? String(b.remind_at) : null;
   if (patch.remind_at !== undefined) patch.reminder_sent = 0;
 
@@ -280,6 +329,32 @@ async function main() {
     };
 
     bot.command("myid", replyMyId);
+
+    bot.action(/^confirm:(.+)$/, async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.answerCbQuery("Нет доступа").catch(() => {});
+        return;
+      }
+      const eventId = ctx.match[1];
+      const event = db.getEvent(eventId);
+      if (!event) {
+        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
+        return;
+      }
+      db.updateEvent(eventId, {
+        confirmation_required: true,
+        confirmed_at: new Date().toISOString(),
+        confirmed_by_tg_id: userId,
+      });
+      await ctx.answerCbQuery("Подтверждено").catch(() => {});
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
+      await ctx.editMessageText(text, {
+        reply_markup: {
+          inline_keyboard: [[{ text: `Позвонить ${phoneForUserName(event.owner_name)}`, url: telHref(phoneForUserName(event.owner_name)) }]],
+        },
+      }).catch(() => {});
+    });
 
     bot.start(async (ctx) => {
       const id = ctx.from?.id;

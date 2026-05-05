@@ -11,6 +11,9 @@ export type EventRow = {
   duration_minutes: number;
   title: string;
   comment: string;
+  confirmation_required: boolean;
+  confirmed_at: string | null;
+  confirmed_by_tg_id: number | null;
   owner_tg_id: number;
   owner_name: string;
   remind_at: string | null;
@@ -36,6 +39,11 @@ function readDisk(): FileStore {
         ...e,
         day_span: Number.isFinite((e as Partial<EventRow>).day_span) ? (e as Partial<EventRow>).day_span! : 1,
         comment: typeof (e as Partial<EventRow>).comment === "string" ? (e as Partial<EventRow>).comment! : "",
+        confirmation_required: Boolean((e as Partial<EventRow>).confirmation_required),
+        confirmed_at: typeof (e as Partial<EventRow>).confirmed_at === "string" ? (e as Partial<EventRow>).confirmed_at! : null,
+        confirmed_by_tg_id: Number.isFinite((e as Partial<EventRow>).confirmed_by_tg_id)
+          ? (e as Partial<EventRow>).confirmed_by_tg_id!
+          : null,
         owner_name:
           typeof (e as Partial<EventRow>).owner_name === "string" && (e as Partial<EventRow>).owner_name!.trim()
             ? (e as Partial<EventRow>).owner_name!.trim()
@@ -76,6 +84,9 @@ export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_se
   const s = getStore();
   s.events.push({
     ...row,
+    confirmation_required: row.confirmation_required ?? false,
+    confirmed_at: row.confirmed_at ?? null,
+    confirmed_by_tg_id: row.confirmed_by_tg_id ?? null,
     owner_name: row.owner_name.trim() || `Пользователь ${row.owner_tg_id}`,
     remind_at: row.remind_at ?? null,
     reminder_sent: row.reminder_sent ?? 0,
@@ -94,6 +105,9 @@ export function updateEvent(
       | "duration_minutes"
       | "title"
       | "comment"
+      | "confirmation_required"
+      | "confirmed_at"
+      | "confirmed_by_tg_id"
       | "remind_at"
       | "reminder_sent"
     >
@@ -108,6 +122,9 @@ export function updateEvent(
   if (patch.duration_minutes !== undefined) ev.duration_minutes = patch.duration_minutes;
   if (patch.title !== undefined) ev.title = patch.title;
   if (patch.comment !== undefined) ev.comment = patch.comment;
+  if (patch.confirmation_required !== undefined) ev.confirmation_required = patch.confirmation_required;
+  if (patch.confirmed_at !== undefined) ev.confirmed_at = patch.confirmed_at;
+  if (patch.confirmed_by_tg_id !== undefined) ev.confirmed_by_tg_id = patch.confirmed_by_tg_id;
   if (patch.remind_at !== undefined) ev.remind_at = patch.remind_at;
   if (patch.reminder_sent !== undefined) ev.reminder_sent = patch.reminder_sent;
   writeDisk(s);
