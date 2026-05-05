@@ -76,11 +76,23 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   const [theme, setTheme] = useState<ThemeMode>(() => hourTheme());
   const [interaction, setInteraction] = useState<Interaction | null>(null);
   const [preview, setPreview] = useState<PreviewPatch | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draftTitles, setDraftTitles] = useState<Record<string, string>>({});
+  const [editor, setEditor] = useState<
+    | null
+    | {
+        mode: "create" | "edit";
+        id?: string;
+        day_index: number;
+        day_span: number;
+        start_minutes: number;
+        duration_minutes: number;
+        title: string;
+      }
+  >(null);
 
   const gridRef = useRef<HTMLDivElement>(null);
   const lastTapRef = useRef<{ day: number; min: number; t: number } | null>(null);
+  const lastBlockTapRef = useRef<{ id: string; t: number } | null>(null);
+  const holdDeletedRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = window.setInterval(() => setTheme(hourTheme()), 60_000);
@@ -129,44 +141,6 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     setMonday(mondayISO(d));
   };
 
-  const createInline = async (day: number, minutes: number) => {
-    try {
-      const tempTitle = "Новое дело";
-      const startMinutes = clamp(snapMin(minutes), 0, 24 * 60 - SNAP);
-      const r = await api.createEvent(
-        {
-          week_monday: monday,
-          day_index: day,
-          day_span: 1,
-          start_minutes: startMinutes,
-          duration_minutes: 60,
-          title: tempTitle,
-        },
-        initData,
-        devUserId,
-      );
-      setEvents((prev) => [
-        ...prev,
-        {
-          id: r.id,
-          week_monday: monday,
-          day_index: day,
-          day_span: 1,
-          start_minutes: startMinutes,
-          duration_minutes: 60,
-          title: "",
-          owner_tg_id: myTgId ?? 0,
-          remind_at: null,
-          reminder_sent: 0,
-        },
-      ]);
-      setDraftTitles((prev) => ({ ...prev, [r.id]: "" }));
-      setEditingId(r.id);
-    } catch (e) {
-      setErr(String(e));
-    }
-  };
-
   const onBackgroundTap = (ev: React.PointerEvent, day: number) => {
     if (ev.target !== ev.currentTarget) return;
     const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -177,7 +151,50 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     const isDouble = !!last && last.day === day && Math.abs(last.min - min) <= SNAP && now - last.t < 340;
     lastTapRef.current = { day, min, t: now };
     if (!isDouble) return;
-    void createInline(day, min);
+    setEditor({
+      mode: "create",
+      day_index: day,
+      day_span: 1,
+      start_minutes: min,
+      duration_minutes: 60,
+      title: "",
+    });
+  };
+
+  const onBlockPointerDown = (ev: React.PointerEvent, e: ApiEvent) => {
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    let moved = false;
+    const timer = window.setTimeout(async () => {
+      if (moved) return;
+      holdDeletedRef.current = e.id;
+      setInteraction(null);
+      setPreview(null);
+      try {
+        await api.deleteEvent(e.id, initData, devUserId);
+        void load();
+      } catch (err) {
+        setErr(String(err));
+      }
+    }, 680);
+    const onMove = (p: PointerEvent) => {
+      if (p.pointerId !== ev.pointerId) return;
+      if (Math.abs(p.clientX - startX) > 8 || Math.abs(p.clientY - startY) > 8) {
+        moved = true;
+        window.clearTimeout(timer);
+      }
+    };
+    const onStop = (p: PointerEvent) => {
+      if (p.pointerId !== ev.pointerId) return;
+      window.clearTimeout(timer);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onStop);
+      window.removeEventListener("pointercancel", onStop);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onStop);
+    window.addEventListener("pointercancel", onStop);
+    beginInteraction(ev, e, "drag");
   };
 
   const beginInteraction = (ev: React.PointerEvent, e: ApiEvent, mode: Interaction["mode"]) => {
@@ -243,6 +260,12 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
 
     const onUp = async (ev: PointerEvent) => {
       if (ev.pointerId !== interaction.pointerId) return;
+      if (holdDeletedRef.current === interaction.id) {
+        holdDeletedRef.current = null;
+        setInteraction(null);
+        setPreview(null);
+        return;
+      }
       const p = preview;
       setInteraction(null);
       setPreview(null);
@@ -275,13 +298,67 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
     };
   }, [interaction, preview, initData, devUserId, load]);
 
-  const commitInlineTitle = async (ev: ApiEvent) => {
-    const v = (draftTitles[ev.id] ?? ev.title).trim();
-    const title = v.length ? v : "Без названия";
-    setEditingId(null);
+  const saveEditor = async () => {
+    if (!editor) return;
+    const title = editor.title.trim() || "Без названия";
     try {
-      await api.patchEvent(ev.id, { title }, initData, devUserId);
-      setDraftTitles((prev) => ({ ...prev, [ev.id]: title }));
+      if (editor.mode === "create") {
+        await api.createEvent(
+          {
+            week_monday: monday,
+            day_index: editor.day_index,
+            day_span: editor.day_span,
+            start_minutes: editor.start_minutes,
+            duration_minutes: editor.duration_minutes,
+            title,
+          },
+          initData,
+          devUserId,
+        );
+      } else if (editor.id) {
+        await api.patchEvent(
+          editor.id,
+          {
+            day_index: editor.day_index,
+            day_span: editor.day_span,
+            start_minutes: editor.start_minutes,
+            duration_minutes: editor.duration_minutes,
+            title,
+          },
+          initData,
+          devUserId,
+        );
+      }
+      setEditor(null);
+      void load();
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
+  const onBlockTap = (ev: React.MouseEvent, e: ApiEvent) => {
+    ev.stopPropagation();
+    const now = Date.now();
+    const last = lastBlockTapRef.current;
+    const isDouble = !!last && last.id === e.id && now - last.t < 340;
+    lastBlockTapRef.current = { id: e.id, t: now };
+    if (!isDouble) return;
+    setEditor({
+      mode: "edit",
+      id: e.id,
+      day_index: e.day_index,
+      day_span: e.day_span,
+      start_minutes: e.start_minutes,
+      duration_minutes: e.duration_minutes,
+      title: e.title,
+    });
+  };
+
+  const removeFromEditor = async () => {
+    if (!editor?.id) return;
+    try {
+      await api.deleteEvent(editor.id, initData, devUserId);
+      setEditor(null);
       void load();
     } catch (e) {
       setErr(String(e));
@@ -348,56 +425,116 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
               const leftPct = (e.day_index / 7) * 100;
               const widthPct = (e.day_span / 7) * 100;
               const mine = myTgId !== null && e.owner_tg_id === myTgId;
-              const isEditing = editingId === e.id;
-              const titleValue = draftTitles[e.id] ?? e.title;
               return (
                 <article
                   key={e.id}
-                  className={`wp-block premium ${mine ? "mine" : "theirs"} ${isEditing ? "editing" : ""}`}
+                  className={`wp-block premium ${mine ? "mine" : "theirs"}`}
                   style={{ top, height, left: `${leftPct}%`, width: `${widthPct}%` }}
-                  onPointerDown={(ev) => beginInteraction(ev, e, "drag")}
+                  onPointerDown={(ev) => onBlockPointerDown(ev, e)}
+                  onClick={(ev) => onBlockTap(ev, e)}
                 >
                   <div className="resize-handle top" onPointerDown={(ev) => beginInteraction(ev, e, "resize-top")} />
                   <div className="resize-handle right" onPointerDown={(ev) => beginInteraction(ev, e, "resize-right")} />
                   <div className="resize-handle bottom" onPointerDown={(ev) => beginInteraction(ev, e, "resize-bottom")} />
 
-                  {isEditing ? (
-                    <input
-                      autoFocus
-                      className="wp-inline-input"
-                      value={titleValue}
-                      onPointerDown={(ev) => ev.stopPropagation()}
-                      onChange={(ev) => setDraftTitles((p) => ({ ...p, [e.id]: ev.target.value }))}
-                      onBlur={() => void commitInlineTitle(e)}
-                      onKeyDown={(ev) => {
-                        if (ev.key === "Enter") {
-                          ev.preventDefault();
-                          void commitInlineTitle(e);
-                        }
-                      }}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="wp-title-btn"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        setDraftTitles((p) => ({ ...p, [e.id]: e.title }));
-                        setEditingId(e.id);
-                      }}
-                    >
-                      <div className="wp-block-title">{e.title}</div>
-                      <div className="wp-block-meta">
-                        {fmtClock(e.start_minutes)} · {fmtClock(e.start_minutes + e.duration_minutes)} · {e.day_span} дн.
-                      </div>
-                    </button>
-                  )}
+                  <div className="wp-title-btn">
+                    <div className="wp-block-title">{e.title}</div>
+                    <div className="wp-block-meta">
+                      {fmtClock(e.start_minutes)} · {fmtClock(e.start_minutes + e.duration_minutes)} · {e.day_span} дн.
+                    </div>
+                  </div>
                 </article>
               );
             })}
           </div>
         </div>
       </div>
+      {editor && (
+        <div className="wp-modal-root" role="dialog" aria-modal>
+          <div className="wp-modal">
+            <h2>{editor.mode === "create" ? "Новое дело" : "Редактировать дело"}</h2>
+            <label className="wp-field">
+              Что сделать
+              <input
+                autoFocus
+                value={editor.title}
+                onChange={(e) => setEditor({ ...editor, title: e.target.value })}
+                placeholder="Например: Помыть посуду"
+              />
+            </label>
+            <div className="wp-row2">
+              <label className="wp-field">
+                День
+                <select
+                  value={editor.day_index}
+                  onChange={(e) => setEditor({ ...editor, day_index: Number(e.target.value) })}
+                >
+                  {WD.map((w, i) => (
+                    <option key={w} value={i}>
+                      {w}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="wp-field">
+                Время
+                <input
+                  type="time"
+                  step={1800}
+                  value={fmtClock(editor.start_minutes)}
+                  onChange={(e) => {
+                    const [hh, mm] = e.target.value.split(":").map(Number);
+                    setEditor({ ...editor, start_minutes: hh * 60 + mm });
+                  }}
+                />
+              </label>
+            </div>
+            <div className="wp-row2">
+              <label className="wp-field">
+                Длительность (ч)
+                <input
+                  type="number"
+                  min={0.5}
+                  step={0.5}
+                  value={editor.duration_minutes / 60}
+                  onChange={(e) =>
+                    setEditor({
+                      ...editor,
+                      duration_minutes: Math.max(SNAP, Math.round((Number(e.target.value) * 60) / SNAP) * SNAP),
+                    })
+                  }
+                />
+              </label>
+              <label className="wp-field">
+                По дням
+                <input
+                  type="number"
+                  min={1}
+                  max={7 - editor.day_index}
+                  step={1}
+                  value={editor.day_span}
+                  onChange={(e) =>
+                    setEditor({ ...editor, day_span: clamp(Number(e.target.value) || 1, 1, 7 - editor.day_index) })
+                  }
+                />
+              </label>
+            </div>
+            <div className="wp-actions">
+              {editor.mode === "edit" && (
+                <button type="button" className="wp-btn danger" onClick={() => void removeFromEditor()}>
+                  Удалить
+                </button>
+              )}
+              <button type="button" className="wp-btn ghost" onClick={() => setEditor(null)}>
+                Отмена
+              </button>
+              <button type="button" className="wp-btn primary" onClick={() => void saveEditor()}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
