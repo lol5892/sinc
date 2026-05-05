@@ -29,6 +29,8 @@ type PreviewPatch = { id: string; day_index?: number; day_span?: number; start_m
 type EditorState = {
   mode: "create" | "edit";
   id?: string;
+  owner_tg_id?: number;
+  readonlyDetails?: boolean;
   day_index: number;
   day_span: number;
   start_minutes: number;
@@ -106,8 +108,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
   const gridRef = useRef<HTMLDivElement>(null);
   const lastTapRef = useRef<{ day: number; min: number; t: number } | null>(null);
-  const holdHandledRef = useRef<string | null>(null);
-  const suppressClickRef = useRef<string | null>(null);
   const currentUserId = useMemo(() => {
     if (myTgId !== null) return myTgId;
     const n = Number(devUserId);
@@ -179,11 +179,14 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
   };
 
   const openEditorForEvent = (e: ApiEvent) => {
+    const mine = isMine(e);
     setInfoBubble(null);
     setCommentEditorOpen(false);
     setEditor({
       mode: "edit",
       id: e.id,
+      owner_tg_id: e.owner_tg_id,
+      readonlyDetails: !mine,
       day_index: e.day_index,
       day_span: e.day_span,
       start_minutes: e.start_minutes,
@@ -217,35 +220,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
   };
 
   const onBlockPointerDown = (ev: React.PointerEvent, e: ApiEvent) => {
-    const mine = isMine(e);
-    const startX = ev.clientX;
-    const startY = ev.clientY;
-    let moved = false;
-    const timer = window.setTimeout(() => {
-      if (moved || !mine) return;
-      holdHandledRef.current = e.id;
-      suppressClickRef.current = e.id;
-      setInteraction(null);
-      setPreview(null);
-      openEditorForEvent(e);
-    }, 680);
-    const onMove = (p: PointerEvent) => {
-      if (p.pointerId !== ev.pointerId) return;
-      if (Math.abs(p.clientX - startX) > 8 || Math.abs(p.clientY - startY) > 8) {
-        moved = true;
-        window.clearTimeout(timer);
-      }
-    };
-    const onStop = (p: PointerEvent) => {
-      if (p.pointerId !== ev.pointerId) return;
-      window.clearTimeout(timer);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onStop);
-      window.removeEventListener("pointercancel", onStop);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onStop);
-    window.addEventListener("pointercancel", onStop);
     beginInteraction(ev, e, "drag");
   };
 
@@ -312,12 +286,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
     const onUp = async (ev: PointerEvent) => {
       if (ev.pointerId !== interaction.pointerId) return;
-      if (holdHandledRef.current === interaction.id) {
-        holdHandledRef.current = null;
-        setInteraction(null);
-        setPreview(null);
-        return;
-      }
       const p = preview;
       setInteraction(null);
       setPreview(null);
@@ -360,6 +328,8 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
   const saveEditor = async () => {
     if (!editor) return;
+    const canEditDetails =
+      editor.mode === "create" || (editor.owner_tg_id !== undefined && currentUserId !== null && editor.owner_tg_id === currentUserId);
     const title = editor.title.trim() || "Без названия";
     try {
       if (editor.mode === "create") {
@@ -378,20 +348,20 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
           devUserName,
         );
       } else if (editor.id) {
-        await api.patchEvent(
-          editor.id,
-          {
-            day_index: editor.day_index,
-            day_span: editor.day_span,
-            start_minutes: editor.start_minutes,
-            duration_minutes: editor.duration_minutes,
-            title,
-            comment: editor.comment,
-          },
-          initData,
-          devUserId,
-          devUserName,
-        );
+        const patch = canEditDetails
+          ? {
+              day_index: editor.day_index,
+              day_span: editor.day_span,
+              start_minutes: editor.start_minutes,
+              duration_minutes: editor.duration_minutes,
+              title,
+              comment: editor.comment,
+            }
+          : {
+              day_index: editor.day_index,
+              start_minutes: editor.start_minutes,
+            };
+        await api.patchEvent(editor.id, patch, initData, devUserId, devUserName);
       }
       setEditor(null);
       setCommentEditorOpen(false);
@@ -403,10 +373,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
   const onBlockTap = (ev: React.MouseEvent, e: ApiEvent) => {
     ev.stopPropagation();
-    if (suppressClickRef.current === e.id) {
-      suppressClickRef.current = null;
-      return;
-    }
     setInfoBubble({ id: e.id, x: ev.clientX, y: ev.clientY });
   };
 
@@ -517,12 +483,22 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       {editor && (
         <div className="wp-modal-root" role="dialog" aria-modal>
           <div className="wp-modal">
-            <h2>{editor.mode === "create" ? "Новое дело" : "Редактировать дело"}</h2>
+            <h2>
+              {editor.mode === "create"
+                ? "Новое дело"
+                : editor.readonlyDetails
+                  ? "Перенести дело"
+                  : "Редактировать дело"}
+            </h2>
+            {editor.readonlyDetails && (
+              <div className="wp-editor-note">Можно изменить только день и время. Название и комментарий меняет автор.</div>
+            )}
             <label className="wp-field">
               Что сделать
               <input
                 autoFocus
                 value={editor.title}
+                disabled={!!editor.readonlyDetails}
                 onChange={(e) => setEditor({ ...editor, title: e.target.value })}
                 placeholder="Например: Помыть посуду"
               />
@@ -532,7 +508,14 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                 День
                 <select
                   value={editor.day_index}
-                  onChange={(e) => setEditor({ ...editor, day_index: Number(e.target.value) })}
+                  onChange={(e) => {
+                    const day_index = Number(e.target.value);
+                    setEditor({
+                      ...editor,
+                      day_index,
+                      day_span: editor.readonlyDetails ? editor.day_span : clamp(editor.day_span, 1, 7 - day_index),
+                    });
+                  }}
                 >
                   {WD.map((w, i) => (
                     <option key={w} value={i}>
@@ -554,48 +537,54 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                 />
               </label>
             </div>
-            <div className="wp-row2">
-              <label className="wp-field">
-                Длительность (ч)
-                <input
-                  type="number"
-                  min={0.5}
-                  step={0.5}
-                  value={editor.duration_minutes / 60}
-                  onChange={(e) =>
-                    setEditor({
-                      ...editor,
-                      duration_minutes: Math.max(SNAP, Math.round((Number(e.target.value) * 60) / SNAP) * SNAP),
-                    })
-                  }
-                />
-              </label>
-              <label className="wp-field">
-                По дням
-                <input
-                  type="number"
-                  min={1}
-                  max={7 - editor.day_index}
-                  step={1}
-                  value={editor.day_span}
-                  onChange={(e) =>
-                    setEditor({ ...editor, day_span: clamp(Number(e.target.value) || 1, 1, 7 - editor.day_index) })
-                  }
-                />
-              </label>
-            </div>
-            <div className="wp-comment-preview">
-              {editor.comment.trim() ? editor.comment.trim() : "Комментарий пока не добавлен"}
-            </div>
+            {!editor.readonlyDetails && (
+              <>
+                <div className="wp-row2">
+                  <label className="wp-field">
+                    Длительность (ч)
+                    <input
+                      type="number"
+                      min={0.5}
+                      step={0.5}
+                      value={editor.duration_minutes / 60}
+                      onChange={(e) =>
+                        setEditor({
+                          ...editor,
+                          duration_minutes: Math.max(SNAP, Math.round((Number(e.target.value) * 60) / SNAP) * SNAP),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="wp-field">
+                  По дням
+                  <input
+                    type="number"
+                    min={1}
+                    max={7 - editor.day_index}
+                    step={1}
+                    value={editor.day_span}
+                    onChange={(e) =>
+                      setEditor({ ...editor, day_span: clamp(Number(e.target.value) || 1, 1, 7 - editor.day_index) })
+                    }
+                  />
+                </label>
+                <div className="wp-comment-preview">
+                  {editor.comment.trim() ? editor.comment.trim() : "Комментарий пока не добавлен"}
+                </div>
+              </>
+            )}
             <div className="wp-actions">
               {editor.mode === "edit" && events.some((event) => event.id === editor.id && isMine(event)) && (
                 <button type="button" className="wp-btn danger" onClick={() => void removeFromEditor()}>
                   Удалить
                 </button>
               )}
-              <button type="button" className="wp-btn ghost" onClick={() => setCommentEditorOpen(true)}>
-                {editor.comment.trim() ? "Изменить комментарий" : "Добавить комментарий"}
-              </button>
+              {!editor.readonlyDetails && (
+                <button type="button" className="wp-btn ghost" onClick={() => setCommentEditorOpen(true)}>
+                  {editor.comment.trim() ? "Изменить комментарий" : "Добавить комментарий"}
+                </button>
+              )}
               <button type="button" className="wp-btn ghost" onClick={() => setEditor(null)}>
                 Отмена
               </button>
@@ -637,7 +626,17 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
           style={bubbleStyle}
           onPointerDown={(ev) => ev.stopPropagation()}
         >
-          <div className="wp-info-title">{bubbleEvent.title}</div>
+          <div className="wp-info-head">
+            <div className="wp-info-title">{bubbleEvent.title}</div>
+            <button
+              type="button"
+              className="wp-gear"
+              aria-label="Открыть изменение дела"
+              onClick={() => openEditorForEvent(bubbleEvent)}
+            >
+              ⚙
+            </button>
+          </div>
           <div className="wp-info-time">
             {WD[bubbleEvent.day_index]} · {fmtClock(bubbleEvent.start_minutes)} —{" "}
             {fmtClock(bubbleEvent.start_minutes + bubbleEvent.duration_minutes)}
