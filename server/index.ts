@@ -3,7 +3,7 @@ import fs from "node:fs";
 import express from "express";
 import cors from "cors";
 import cron from "node-cron";
-import { Markup, Telegraf, type Context } from "telegraf";
+import { Telegraf, type Context } from "telegraf";
 import { randomUUID } from "node:crypto";
 import dotenv from "dotenv";
 import { parseAndValidateInitData } from "./auth.js";
@@ -24,76 +24,66 @@ const ALLOWED = new Set(
     .map(Number)
     .filter((n) => Number.isFinite(n)),
 );
-const ANTON_TG_ID = Number(process.env.ANTON_TG_ID || "296014099");
-const TATYANA_TG_ID = Number(process.env.TATYANA_TG_ID || "0");
-const ANTON_PHONE = process.env.ANTON_PHONE ?? "";
-const TATYANA_PHONE = process.env.TATYANA_PHONE ?? "";
 
 /** Для отправки сообщений из HTTP (новое дело и т.д.). */
 let botForNotify: Telegraf | null = null;
 
-function resolveTatyanaId(): number | null {
-  if (Number.isFinite(TATYANA_TG_ID) && TATYANA_TG_ID > 0) return TATYANA_TG_ID;
-  const fallback = Array.from(ALLOWED).find((id) => id !== ANTON_TG_ID);
-  return fallback ?? null;
+type AuthUser = { id: number; name: string };
+
+function displayUserName(user: { id: number; first_name?: string; last_name?: string; username?: string }): string {
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  return fullName || (user.username ? `@${user.username}` : `Пользователь ${user.id}`);
 }
 
-function personNameById(id: number): "Антон" | "Татьяна" {
-  return id === ANTON_TG_ID ? "Антон" : "Татьяна";
+function phoneForUserName(name: string): string {
+  const normalized = name.toLocaleLowerCase("ru-RU");
+  if (normalized.includes("татьян") || normalized.includes("tatiana") || normalized.includes("tatyana")) {
+    return "8901-485-6774";
+  }
+  return "8960-008-48-43";
 }
 
-function assigneeToUserId(assignee: "anton" | "tatyana"): number | null {
-  if (assignee === "anton") return Number.isFinite(ANTON_TG_ID) && ANTON_TG_ID > 0 ? ANTON_TG_ID : null;
-  return resolveTatyanaId();
+function confirmationKeyboard(eventId: string, mode: "initial" | "after-call" = "initial") {
+  const rows = [[{ text: "Подтвердить", callback_data: `confirm:${eventId}` }]];
+  rows.push(
+    mode === "initial"
+      ? [{ text: "Позвонить", callback_data: `call:${eventId}` }]
+      : [{ text: "Отказаться", callback_data: `decline:${eventId}` }],
+  );
+  return { inline_keyboard: rows };
 }
 
-async function notifyAssignee(assignee: "anton" | "tatyana", text: string) {
-  if (!botForNotify) return;
-  const uid = assigneeToUserId(assignee);
-  if (!uid) return;
-  try {
-    await botForNotify.telegram.sendMessage(uid, text);
-  } catch (e) {
-    console.error("Уведомление не дошло до", uid, e);
+async function notifyOthersInFamily(creatorId: number, text: string) {
+  if (!botForNotify || ALLOWED.size < 2) return;
+  for (const uid of ALLOWED) {
+    if (uid === creatorId) continue;
+    try {
+      await botForNotify.telegram.sendMessage(uid, text);
+    } catch (e) {
+      console.error("Уведомление не дошло до", uid, e);
+    }
   }
 }
 
-function phoneByAuthorId(authorId: number): string {
-  if (authorId === ANTON_TG_ID) return ANTON_PHONE;
-  return TATYANA_PHONE;
-}
-
-function notificationText(ev: db.EventRow): string {
-  const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-  const hh = String(Math.floor(ev.start_minutes / 60)).padStart(2, "0");
-  const mm = String(ev.start_minutes % 60).padStart(2, "0");
-  const creatorName = personNameById(ev.owner_tg_id);
-  const comment = ev.comment.trim() ? ev.comment.trim() : "без комментария";
-  return [
-    "Новое дело для тебя:",
-    `Название: ${ev.title}`,
-    `Время: ${WD[ev.day_index]}, ${hh}:${mm}`,
-    `Комментарий: ${comment}`,
-    `От: ${creatorName}`,
-  ].join("\n");
-}
-
-function pendingKeyboard(eventId: string) {
-  return Markup.inlineKeyboard([
-    [
-      Markup.button.callback("Подтвердить", `approve:${eventId}`),
-      Markup.button.callback("Позвонить", `call:${eventId}`),
-    ],
-  ]);
-}
-
-function afterCallKeyboard(eventId: string) {
-  return Markup.inlineKeyboard([
-    [
-      Markup.button.callback("Подтвердить", `approve:${eventId}`),
-      Markup.button.callback("Отказаться", `reject:${eventId}`),
-    ],
-  ]);
+async function requestConfirmationFromOthers(creator: AuthUser, eventId: string, title: string, when: string) {
+  if (!botForNotify || ALLOWED.size < 2) return;
+  const event = db.getEvent(eventId);
+  const comment = event?.comment?.trim() ? event.comment.trim() : "без комментария";
+  const text = `Нужно подтверждение дела:\nНазвание: ${title}\nВремя: ${when}\nКомментарий: ${comment}\nДобавил: ${creator.name}`;
+  for (const uid of ALLOWED) {
+    if (uid === creator.id) continue;
+    try {
+      const message = await botForNotify.telegram.sendMessage(uid, text, {
+        reply_markup: confirmationKeyboard(eventId),
+      });
+      db.updateEvent(eventId, {
+        confirmation_message_chat_id: message.chat.id,
+        confirmation_message_id: message.message_id,
+      });
+    } catch (e) {
+      console.error("Запрос подтверждения не дошёл до", uid, e);
+    }
+  }
 }
 
 function assertAllowed(userId: number) {
@@ -104,10 +94,17 @@ function assertAllowed(userId: number) {
   if (!ALLOWED.has(userId)) throw new Error("forbidden");
 }
 
-function authUser(req: express.Request): number {
+function authUser(req: express.Request): AuthUser {
   if (NODE_ENV === "development") {
     const dev = req.headers["x-dev-user-id"];
-    if (typeof dev === "string" && ALLOWED.has(Number(dev))) return Number(dev);
+    if (typeof dev === "string" && ALLOWED.has(Number(dev))) {
+      const id = Number(dev);
+      const devName = req.headers["x-dev-user-name"];
+      return {
+        id,
+        name: typeof devName === "string" && devName.trim() ? devName.trim().slice(0, 120) : `Пользователь ${id}`,
+      };
+    }
   }
   const h = req.headers.authorization;
   if (!h?.startsWith("tma ")) throw new Error("unauthorized");
@@ -115,7 +112,7 @@ function authUser(req: express.Request): number {
   const v = parseAndValidateInitData(initData, BOT_TOKEN);
   if (!v) throw new Error("unauthorized");
   assertAllowed(v.userId);
-  return v.userId;
+  return { id: v.userId, name: displayUserName(v.user) };
 }
 
 function mondayISO(d: Date): string {
@@ -158,9 +155,9 @@ app.get("/api/week", (req, res) => {
 });
 
 app.post("/api/events", (req, res) => {
-  let userId: number;
+  let user: AuthUser;
   try {
-    userId = authUser(req);
+    user = authUser(req);
   } catch (e) {
     const m = (e as Error).message;
     if (m === "forbidden") return res.status(403).json({ error: "forbidden" });
@@ -173,8 +170,8 @@ app.post("/api/events", (req, res) => {
     start_minutes?: number;
     duration_minutes?: number;
     title?: string;
-    comment?: string;
-    assignee?: "tatyana" | "anton";
+    comment?: string | null;
+    confirmation_required?: boolean;
     remind_at?: string | null;
   };
   if (!b.week_monday || !/^\d{4}-\d{2}-\d{2}$/.test(b.week_monday))
@@ -188,11 +185,10 @@ app.post("/api/events", (req, res) => {
   if (typeof b.duration_minutes !== "number" || b.duration_minutes < 15 || b.duration_minutes > 24 * 60)
     return res.status(400).json({ error: "duration_minutes" });
   if (typeof b.title !== "string" || !b.title.trim()) return res.status(400).json({ error: "title" });
-  if (b.assignee !== "tatyana" && b.assignee !== "anton") return res.status(400).json({ error: "assignee" });
   const titleTrim = b.title.trim().slice(0, 500);
-  const commentTrim = typeof b.comment === "string" ? b.comment.trim().slice(0, 500) : "";
+  const commentTrim = typeof b.comment === "string" ? b.comment.trim().slice(0, 1000) : "";
   const id = randomUUID();
-  const created: db.EventRow = {
+  db.insertEvent({
     id,
     week_monday: b.week_monday,
     day_index: b.day_index,
@@ -201,43 +197,40 @@ app.post("/api/events", (req, res) => {
     duration_minutes: b.duration_minutes,
     title: titleTrim,
     comment: commentTrim,
-    assignee: b.assignee,
-    owner_tg_id: userId,
-    approval_status: "pending",
-    approval_message_chat_id: null,
-    approval_message_id: null,
+    confirmation_required: true,
+    confirmed_at: null,
+    confirmed_by_tg_id: null,
+    declined_at: null,
+    declined_by_tg_id: null,
+    call_clicked_at: null,
+    call_clicked_by_tg_id: null,
+    confirmation_message_chat_id: null,
+    confirmation_message_id: null,
+    owner_tg_id: user.id,
+    owner_name: user.name,
     remind_at: b.remind_at && b.remind_at.length > 0 ? b.remind_at : null,
-    reminder_sent: 0,
-  };
-  db.insertEvent(created);
-  const assigneeId = assigneeToUserId(b.assignee);
-  if (botForNotify && assigneeId) {
-    void botForNotify.telegram
-      .sendMessage(assigneeId, notificationText(created), pendingKeyboard(created.id))
-      .then((msg) => {
-        db.updateEvent(created.id, {
-          approval_message_chat_id: msg.chat.id,
-          approval_message_id: msg.message_id,
-        });
-      })
-      .catch((e) => console.error("Не удалось отправить кнопки подтверждения:", e));
-  } else {
-    void notifyAssignee(b.assignee, notificationText(created));
-  }
+  });
+  const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const hh = String(Math.floor(b.start_minutes / 60)).padStart(2, "0");
+  const mm = String(b.start_minutes % 60).padStart(2, "0");
+  const msg = `Новое дело в общем плане:\n«${titleTrim}»\n${WD[b.day_index]}, ${hh}:${mm}`;
+  void notifyOthersInFamily(user.id, msg);
+  void requestConfirmationFromOthers(user, id, titleTrim, `${WD[b.day_index]}, ${hh}:${mm}`);
   return res.json({ id });
 });
 
 app.patch("/api/events/:id", (req, res) => {
-  let userId: number;
+  let user: AuthUser;
   try {
-    userId = authUser(req);
+    user = authUser(req);
   } catch (e) {
     const m = (e as Error).message;
     if (m === "forbidden") return res.status(403).json({ error: "forbidden" });
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  if (!db.eventExists(id)) return res.status(404).json({ error: "not_found" });
+  const event = db.getEvent(id);
+  if (!event) return res.status(404).json({ error: "not_found" });
 
   const b = req.body as Partial<{
     day_index: number;
@@ -245,10 +238,20 @@ app.patch("/api/events/:id", (req, res) => {
     start_minutes: number;
     duration_minutes: number;
     title: string;
-    comment: string;
-    assignee: "tatyana" | "anton";
+    comment: string | null;
+    confirmation_required: boolean;
     remind_at: string | null;
   }>;
+  if (event.owner_tg_id !== user.id) {
+    const triesOwnerOnlyChange =
+      "title" in b ||
+      "comment" in b ||
+      "confirmation_required" in b ||
+      "remind_at" in b ||
+      (typeof b.day_span === "number" && b.day_span !== event.day_span) ||
+      (typeof b.duration_minutes === "number" && b.duration_minutes !== event.duration_minutes);
+    if (triesOwnerOnlyChange) return res.status(403).json({ error: "owner_only" });
+  }
   const patch: Parameters<typeof db.updateEvent>[1] = {};
   if (typeof b.day_index === "number" && b.day_index >= 0 && b.day_index <= 6) patch.day_index = b.day_index;
   if (typeof b.day_span === "number" && b.day_span >= 1 && b.day_span <= 7) patch.day_span = b.day_span;
@@ -257,8 +260,14 @@ app.patch("/api/events/:id", (req, res) => {
   if (typeof b.duration_minutes === "number" && b.duration_minutes >= 15 && b.duration_minutes <= 24 * 60)
     patch.duration_minutes = b.duration_minutes;
   if (typeof b.title === "string" && b.title.trim()) patch.title = b.title.trim().slice(0, 500);
-  if (typeof b.comment === "string") patch.comment = b.comment.trim().slice(0, 500);
-  if (b.assignee === "tatyana" || b.assignee === "anton") patch.assignee = b.assignee;
+  if ("comment" in b) patch.comment = b.comment == null ? "" : String(b.comment).trim().slice(0, 1000);
+  if ("confirmation_required" in b) {
+    patch.confirmation_required = b.confirmation_required === true;
+    if (patch.confirmation_required === false) {
+      patch.confirmed_at = null;
+      patch.confirmed_by_tg_id = null;
+    }
+  }
   if ("remind_at" in b) patch.remind_at = b.remind_at && String(b.remind_at).length ? String(b.remind_at) : null;
   if (patch.remind_at !== undefined) patch.reminder_sent = 0;
 
@@ -267,16 +276,18 @@ app.patch("/api/events/:id", (req, res) => {
 });
 
 app.delete("/api/events/:id", (req, res) => {
-  let userId: number;
+  let user: AuthUser;
   try {
-    userId = authUser(req);
+    user = authUser(req);
   } catch (e) {
     const m = (e as Error).message;
     if (m === "forbidden") return res.status(403).json({ error: "forbidden" });
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  if (!db.eventExists(id)) return res.status(404).json({ error: "not_found" });
+  const event = db.getEvent(id);
+  if (!event) return res.status(404).json({ error: "not_found" });
+  if (event.owner_tg_id !== user.id) return res.status(403).json({ error: "owner_only" });
   db.deleteEvent(id);
   return res.json({ ok: true });
 });
@@ -294,10 +305,8 @@ async function sendReminders(bot: Telegraf) {
   const rows = db.dueReminders(now);
   for (const ev of rows) {
     const when = `${String(Math.floor(ev.start_minutes / 60)).padStart(2, "0")}:${String(ev.start_minutes % 60).padStart(2, "0")}`;
-    const ownerName = personNameById(ev.owner_tg_id);
-    const text = `Напоминание: «${ev.title}» (${when}, день ${ev.day_index + 1})\nОт: ${ownerName}`;
-    const uid = assigneeToUserId(ev.assignee);
-    if (uid) {
+    const text = `Напоминание: «${ev.title}» (${when}, день ${ev.day_index + 1})`;
+    for (const uid of ALLOWED) {
       try {
         await bot.telegram.sendMessage(uid, text);
       } catch (e) {
@@ -331,6 +340,74 @@ async function main() {
 
     bot.command("myid", replyMyId);
 
+    bot.action(/^call:(.+)$/, async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.answerCbQuery("Нет доступа").catch(() => {});
+        return;
+      }
+      const eventId = ctx.match[1];
+      const event = db.getEvent(eventId);
+      if (!event) {
+        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
+        return;
+      }
+      const now = new Date().toISOString();
+      db.updateEvent(event.id, {
+        call_clicked_at: now,
+        call_clicked_by_tg_id: userId,
+      });
+      await ctx
+        .editMessageReplyMarkup(confirmationKeyboard(event.id, "after-call"))
+        .catch((e) => console.error("Не удалось заменить кнопки после звонка", e));
+      const phone = phoneForUserName(event.owner_name);
+      await ctx.reply(`Телефон автора: ${phone}\nНажми на номер, чтобы сразу открыть звонок.`);
+      await ctx.answerCbQuery("Показываю номер автора").catch(() => {});
+    });
+
+    bot.action(/^confirm:(.+)$/, async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.answerCbQuery("Нет доступа").catch(() => {});
+        return;
+      }
+      const eventId = ctx.match[1];
+      const event = db.getEvent(eventId);
+      if (!event) {
+        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
+        return;
+      }
+      db.updateEvent(eventId, {
+        confirmation_required: true,
+        confirmed_at: new Date().toISOString(),
+        confirmed_by_tg_id: userId,
+      });
+      await ctx.answerCbQuery("Подтверждено").catch(() => {});
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
+      await ctx.editMessageText(text).catch(() => {});
+    });
+
+    bot.action(/^decline:(.+)$/, async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.answerCbQuery("Нет доступа").catch(() => {});
+        return;
+      }
+      const eventId = ctx.match[1];
+      const event = db.getEvent(eventId);
+      if (!event) {
+        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
+        return;
+      }
+      db.updateEvent(eventId, {
+        declined_at: new Date().toISOString(),
+        declined_by_tg_id: userId,
+      });
+      await ctx.answerCbQuery("Отказано").catch(() => {});
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n❌ Отказано`;
+      await ctx.editMessageText(text).catch(() => {});
+    });
+
     bot.start(async (ctx) => {
       const id = ctx.from?.id;
       if (id && ALLOWED.size && !ALLOWED.has(id)) {
@@ -348,62 +425,6 @@ async function main() {
           "Задай на сервере переменную WEB_APP_URL — публичный https-адрес, где открывается это приложение (Mini App).",
         );
       }
-    });
-
-    bot.action(/^call:(.+)$/, async (ctx) => {
-      const eventId = ctx.match[1];
-      const ev = db.getEventById(eventId);
-      if (!ev || ev.approval_status !== "pending") {
-        await ctx.answerCbQuery("Дело уже обработано");
-        return;
-      }
-      const phone = phoneByAuthorId(ev.owner_tg_id);
-      await ctx.editMessageReplyMarkup(afterCallKeyboard(eventId).reply_markup).catch(() => {});
-      if (phone) {
-        await ctx.reply(`Телефон автора: ${phone}\nНажми на номер, чтобы позвонить.`);
-      } else {
-        await ctx.reply("Телефон автора не настроен в .env (ANTON_PHONE / TATYANA_PHONE).");
-      }
-      await ctx.answerCbQuery("Открыл варианты: подтвердить или отказаться");
-    });
-
-    bot.action(/^approve:(.+)$/, async (ctx) => {
-      const eventId = ctx.match[1];
-      const ev = db.getEventById(eventId);
-      if (!ev) {
-        await ctx.answerCbQuery("Дело не найдено");
-        return;
-      }
-      if (ev.approval_status === "confirmed") {
-        await ctx.answerCbQuery("Уже подтверждено");
-        return;
-      }
-      if (ev.approval_status === "rejected") {
-        await ctx.answerCbQuery("Ранее уже отказались");
-        return;
-      }
-      db.updateEvent(eventId, { approval_status: "confirmed" });
-      await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
-      await ctx.answerCbQuery("Подтверждено");
-      const assigneeName = ev.assignee === "anton" ? "Антон" : "Татьяна";
-      await ctx.reply(`Дело подтверждено и появилось в планере.\nНазвание: ${ev.title}\nИсполнитель: ${assigneeName}`);
-    });
-
-    bot.action(/^reject:(.+)$/, async (ctx) => {
-      const eventId = ctx.match[1];
-      const ev = db.getEventById(eventId);
-      if (!ev) {
-        await ctx.answerCbQuery("Дело не найдено");
-        return;
-      }
-      if (ev.approval_status === "rejected") {
-        await ctx.answerCbQuery("Уже отклонено");
-        return;
-      }
-      db.updateEvent(eventId, { approval_status: "rejected" });
-      await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
-      await ctx.answerCbQuery("Отклонено");
-      await ctx.reply(`Отказ от дела: ${ev.title}\nВ графике это дело не появится.`);
     });
   } else {
     botForNotify = null;

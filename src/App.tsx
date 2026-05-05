@@ -22,6 +22,7 @@ declare global {
 export default function App() {
   const [ready, setReady] = useState(false);
   const devUserId = import.meta.env.VITE_DEV_USER_ID as string | undefined;
+  const devUserName = import.meta.env.VITE_DEV_USER_NAME as string | undefined;
 
   const { initData, myTgId } = useMemo(() => {
     const tg = typeof window !== "undefined" ? window.Telegram?.WebApp : undefined;
@@ -65,5 +66,5 @@ export default function App() {
     );
   }
 
-  return <WeekPlanner initData={initData} devUserId={devUserId} myTgId={myTgId} />;
+  return <WeekPlanner initData={initData} devUserId={devUserId} devUserName={devUserName} myTgId={myTgId} />;
 }

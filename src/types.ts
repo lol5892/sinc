@@ -7,9 +7,15 @@ export type ApiEvent = {
   duration_minutes: number;
   title: string;
   comment: string;
-  assignee: "tatyana" | "anton";
+  confirmation_required: boolean;
+  confirmed_at: string | null;
+  confirmed_by_tg_id: number | null;
+  declined_at: string | null;
+  declined_by_tg_id: number | null;
+  call_clicked_at: string | null;
+  call_clicked_by_tg_id: number | null;
   owner_tg_id: number;
-  approval_status: "pending" | "confirmed" | "rejected";
+  owner_name: string;
   remind_at: string | null;
   reminder_sent: number;
 };

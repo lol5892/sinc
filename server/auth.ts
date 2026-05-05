@@ -5,7 +5,11 @@ export function parseAndValidateInitData(
   initData: string,
   botToken: string,
   maxAgeSec = 86400,
-): { userId: number; raw: Record<string, string> } | null {
+): {
+  userId: number;
+  user: { id: number; first_name?: string; last_name?: string; username?: string };
+  raw: Record<string, string>;
+} | null {
   if (!initData || !botToken) return null;
   const params = new URLSearchParams(initData);
   const hash = params.get("hash");
@@ -34,11 +38,11 @@ export function parseAndValidateInitData(
   const userJson = params.get("user");
   if (!userJson) return null;
   try {
-    const user = JSON.parse(userJson) as { id?: number };
+    const user = JSON.parse(userJson) as { id?: number; first_name?: string; last_name?: string; username?: string };
     if (typeof user.id !== "number") return null;
     const raw: Record<string, string> = {};
     for (const [k, v] of params.entries()) raw[k] = v;
-    return { userId: user.id, raw };
+    return { userId: user.id, user: { ...user, id: user.id }, raw };
   } catch {
     return null;
   }

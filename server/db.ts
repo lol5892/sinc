@@ -11,11 +11,17 @@ export type EventRow = {
   duration_minutes: number;
   title: string;
   comment: string;
-  assignee: "tatyana" | "anton";
+  confirmation_required: boolean;
+  confirmed_at: string | null;
+  confirmed_by_tg_id: number | null;
+  declined_at: string | null;
+  declined_by_tg_id: number | null;
+  call_clicked_at: string | null;
+  call_clicked_by_tg_id: number | null;
+  confirmation_message_chat_id: number | null;
+  confirmation_message_id: number | null;
   owner_tg_id: number;
-  approval_status: "pending" | "confirmed" | "rejected";
-  approval_message_chat_id: number | null;
-  approval_message_id: number | null;
+  owner_name: string;
   remind_at: string | null;
   reminder_sent: number;
 };
@@ -38,19 +44,31 @@ function readDisk(): FileStore {
       events: p.events.map((e) => ({
         ...e,
         day_span: Number.isFinite((e as Partial<EventRow>).day_span) ? (e as Partial<EventRow>).day_span! : 1,
-        assignee: (e as Partial<EventRow>).assignee === "tatyana" ? "tatyana" : "anton",
         comment: typeof (e as Partial<EventRow>).comment === "string" ? (e as Partial<EventRow>).comment! : "",
-        approval_status:
-          (e as Partial<EventRow>).approval_status === "confirmed" ||
-          (e as Partial<EventRow>).approval_status === "rejected"
-            ? (e as Partial<EventRow>).approval_status!
-            : "pending",
-        approval_message_chat_id: Number.isFinite((e as Partial<EventRow>).approval_message_chat_id)
-          ? (e as Partial<EventRow>).approval_message_chat_id!
+        confirmation_required: Boolean((e as Partial<EventRow>).confirmation_required),
+        confirmed_at: typeof (e as Partial<EventRow>).confirmed_at === "string" ? (e as Partial<EventRow>).confirmed_at! : null,
+        confirmed_by_tg_id: Number.isFinite((e as Partial<EventRow>).confirmed_by_tg_id)
+          ? (e as Partial<EventRow>).confirmed_by_tg_id!
           : null,
-        approval_message_id: Number.isFinite((e as Partial<EventRow>).approval_message_id)
-          ? (e as Partial<EventRow>).approval_message_id!
+        declined_at: typeof (e as Partial<EventRow>).declined_at === "string" ? (e as Partial<EventRow>).declined_at! : null,
+        declined_by_tg_id: Number.isFinite((e as Partial<EventRow>).declined_by_tg_id)
+          ? (e as Partial<EventRow>).declined_by_tg_id!
           : null,
+        call_clicked_at:
+          typeof (e as Partial<EventRow>).call_clicked_at === "string" ? (e as Partial<EventRow>).call_clicked_at! : null,
+        call_clicked_by_tg_id: Number.isFinite((e as Partial<EventRow>).call_clicked_by_tg_id)
+          ? (e as Partial<EventRow>).call_clicked_by_tg_id!
+          : null,
+        confirmation_message_chat_id: Number.isFinite((e as Partial<EventRow>).confirmation_message_chat_id)
+          ? (e as Partial<EventRow>).confirmation_message_chat_id!
+          : null,
+        confirmation_message_id: Number.isFinite((e as Partial<EventRow>).confirmation_message_id)
+          ? (e as Partial<EventRow>).confirmation_message_id!
+          : null,
+        owner_name:
+          typeof (e as Partial<EventRow>).owner_name === "string" && (e as Partial<EventRow>).owner_name!.trim()
+            ? (e as Partial<EventRow>).owner_name!.trim()
+            : `Пользователь ${e.owner_tg_id}`,
       })),
     };
   } catch {
@@ -73,13 +91,18 @@ export function initStore() {
   getStore();
 }
 
-export function eventExists(id: string): boolean {
-  return getStore().events.some((e) => e.id === id);
+export function getEvent(id: string): EventRow | null {
+  return getStore().events.find((e) => e.id === id) ?? null;
 }
 
 export function listEventsForWeek(weekMonday: string): EventRow[] {
   return getStore()
-    .events.filter((e) => e.week_monday === weekMonday && e.approval_status === "confirmed")
+    .events.filter((e) => {
+      if (e.week_monday !== weekMonday) return false;
+      if (e.declined_at) return false;
+      if (!e.confirmation_required) return true;
+      return Boolean(e.confirmed_at);
+    })
     .sort((a, b) => a.day_index - b.day_index || a.start_minutes - b.start_minutes);
 }
 
@@ -87,10 +110,16 @@ export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_se
   const s = getStore();
   s.events.push({
     ...row,
-    comment: row.comment ?? "",
-    approval_status: row.approval_status ?? "pending",
-    approval_message_chat_id: row.approval_message_chat_id ?? null,
-    approval_message_id: row.approval_message_id ?? null,
+    confirmation_required: row.confirmation_required ?? false,
+    confirmed_at: row.confirmed_at ?? null,
+    confirmed_by_tg_id: row.confirmed_by_tg_id ?? null,
+    declined_at: row.declined_at ?? null,
+    declined_by_tg_id: row.declined_by_tg_id ?? null,
+    call_clicked_at: row.call_clicked_at ?? null,
+    call_clicked_by_tg_id: row.call_clicked_by_tg_id ?? null,
+    confirmation_message_chat_id: row.confirmation_message_chat_id ?? null,
+    confirmation_message_id: row.confirmation_message_id ?? null,
+    owner_name: row.owner_name.trim() || `Пользователь ${row.owner_tg_id}`,
     remind_at: row.remind_at ?? null,
     reminder_sent: row.reminder_sent ?? 0,
   });
@@ -108,10 +137,15 @@ export function updateEvent(
       | "duration_minutes"
       | "title"
       | "comment"
-      | "assignee"
-      | "approval_status"
-      | "approval_message_chat_id"
-      | "approval_message_id"
+      | "confirmation_required"
+      | "confirmed_at"
+      | "confirmed_by_tg_id"
+      | "declined_at"
+      | "declined_by_tg_id"
+      | "call_clicked_at"
+      | "call_clicked_by_tg_id"
+      | "confirmation_message_chat_id"
+      | "confirmation_message_id"
       | "remind_at"
       | "reminder_sent"
     >
@@ -126,10 +160,15 @@ export function updateEvent(
   if (patch.duration_minutes !== undefined) ev.duration_minutes = patch.duration_minutes;
   if (patch.title !== undefined) ev.title = patch.title;
   if (patch.comment !== undefined) ev.comment = patch.comment;
-  if (patch.assignee !== undefined) ev.assignee = patch.assignee;
-  if (patch.approval_status !== undefined) ev.approval_status = patch.approval_status;
-  if (patch.approval_message_chat_id !== undefined) ev.approval_message_chat_id = patch.approval_message_chat_id;
-  if (patch.approval_message_id !== undefined) ev.approval_message_id = patch.approval_message_id;
+  if (patch.confirmation_required !== undefined) ev.confirmation_required = patch.confirmation_required;
+  if (patch.confirmed_at !== undefined) ev.confirmed_at = patch.confirmed_at;
+  if (patch.confirmed_by_tg_id !== undefined) ev.confirmed_by_tg_id = patch.confirmed_by_tg_id;
+  if (patch.declined_at !== undefined) ev.declined_at = patch.declined_at;
+  if (patch.declined_by_tg_id !== undefined) ev.declined_by_tg_id = patch.declined_by_tg_id;
+  if (patch.call_clicked_at !== undefined) ev.call_clicked_at = patch.call_clicked_at;
+  if (patch.call_clicked_by_tg_id !== undefined) ev.call_clicked_by_tg_id = patch.call_clicked_by_tg_id;
+  if (patch.confirmation_message_chat_id !== undefined) ev.confirmation_message_chat_id = patch.confirmation_message_chat_id;
+  if (patch.confirmation_message_id !== undefined) ev.confirmation_message_id = patch.confirmation_message_id;
   if (patch.remind_at !== undefined) ev.remind_at = patch.remind_at;
   if (patch.reminder_sent !== undefined) ev.reminder_sent = patch.reminder_sent;
   writeDisk(s);
@@ -143,15 +182,6 @@ export function deleteEvent(id: string) {
 
 export function dueReminders(nowIso: string): EventRow[] {
   return getStore().events.filter(
-    (e) =>
-      e.approval_status === "confirmed" &&
-      e.reminder_sent === 0 &&
-      e.remind_at != null &&
-      e.remind_at !== "" &&
-      e.remind_at <= nowIso,
+    (e) => e.reminder_sent === 0 && e.remind_at != null && e.remind_at !== "" && e.remind_at <= nowIso,
   );
-}
-
-export function getEventById(id: string): EventRow | null {
-  return getStore().events.find((e) => e.id === id) ?? null;
 }
