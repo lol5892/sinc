@@ -90,13 +90,25 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   >(null);
 
   const gridRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLElement>(null);
   const lastTapRef = useRef<{ day: number; min: number; t: number } | null>(null);
   const lastBlockTapRef = useRef<{ id: string; t: number } | null>(null);
   const holdDeletedRef = useRef<string | null>(null);
+  const [headHeight, setHeadHeight] = useState(74);
 
   useEffect(() => {
     const id = window.setInterval(() => setTheme(hourTheme()), 60_000);
     return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const update = () => {
+      const h = headRef.current?.offsetHeight ?? 74;
+      setHeadHeight(h);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
   }, []);
 
   const load = useCallback(async () => {
@@ -366,8 +378,11 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
   };
 
   return (
-    <div className={`wp ${theme === "dark" ? "theme-dark" : "theme-light"}`}>
-      <header className="wp-head glass">
+    <div
+      className={`wp ${theme === "dark" ? "theme-dark" : "theme-light"}`}
+      style={{ ["--head-h" as string]: `${headHeight}px` }}
+    >
+      <header ref={headRef} className="wp-head glass">
         <div className="wp-brand">
           <span className="wp-logo">◍</span>
           <div>

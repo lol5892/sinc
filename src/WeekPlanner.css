@@ -6,6 +6,7 @@
   font-family: "SF Pro Display", "DM Sans", system-ui, sans-serif;
   background: radial-gradient(120% 60% at 50% 0%, var(--wp-glow), transparent 55%), var(--wp-bg);
   overscroll-behavior-y: contain;
+  --head-h: 74px;
 }
 
 .wp.theme-dark {
@@ -143,8 +144,8 @@
 .wp-corner {
   position: sticky;
   left: 0;
-  top: 74px;
-  z-index: 6;
+  top: var(--head-h);
+  z-index: 36;
   background: var(--wp-bg);
   border-bottom: 1px solid var(--wp-line);
 }
@@ -155,8 +156,8 @@
   border-left: 1px solid var(--wp-line);
   padding: 0.55rem 0.3rem;
   position: sticky;
-  top: 74px;
-  z-index: 5;
+  top: var(--head-h);
+  z-index: 35;
 }
 
 .wp-dn {
@@ -213,7 +214,7 @@
   top: 48px;
   right: 0;
   bottom: 0;
-  z-index: 10;
+  z-index: 12;
   pointer-events: none;
 }
 
