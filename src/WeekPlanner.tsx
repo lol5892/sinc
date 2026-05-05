@@ -354,7 +354,7 @@ export default function WeekPlanner({ initData, devUserId, myTgId }: Props) {
                 <article
                   key={e.id}
                   className={`wp-block premium ${mine ? "mine" : "theirs"} ${isEditing ? "editing" : ""}`}
-                  style={{ top, height, left: `${leftPct}%`, width: `calc(${widthPct}% - 8px)` }}
+                  style={{ top, height, left: `${leftPct}%`, width: `${widthPct}%` }}
                   onPointerDown={(ev) => beginInteraction(ev, e, "drag")}
                 >
                   <div className="resize-handle top" onPointerDown={(ev) => beginInteraction(ev, e, "resize-top")} />
