@@ -43,6 +43,16 @@ function phoneForUserName(name: string): string {
   return "8960-008-48-43";
 }
 
+function callButtonText(name: string): string {
+  const phone = phoneForUserName(name);
+  const normalized = name.toLocaleLowerCase("ru-RU");
+  const label =
+    normalized.includes("татьян") || normalized.includes("tatiana") || normalized.includes("tatyana")
+      ? "Татьяне"
+      : "Антону";
+  return `Позвонить ${label}: ${phone}`;
+}
+
 function telHref(phone: string): string {
   return `tel:${phone.replace(/[^\d+]/g, "")}`;
 }
@@ -70,7 +80,7 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
         reply_markup: {
           inline_keyboard: [
             [{ text: "Подтвердить", callback_data: `confirm:${eventId}` }],
-            [{ text: `Позвонить ${phone}`, url: telHref(phone) }],
+            [{ text: callButtonText(creator.name), url: telHref(phone) }],
           ],
         },
       });
@@ -351,7 +361,7 @@ async function main() {
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
       await ctx.editMessageText(text, {
         reply_markup: {
-          inline_keyboard: [[{ text: `Позвонить ${phoneForUserName(event.owner_name)}`, url: telHref(phoneForUserName(event.owner_name)) }]],
+          inline_keyboard: [[{ text: callButtonText(event.owner_name), url: telHref(phoneForUserName(event.owner_name)) }]],
         },
       }).catch(() => {});
     });
