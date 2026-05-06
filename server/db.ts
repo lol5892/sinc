@@ -29,7 +29,16 @@ export type EventRow = {
 
 type FileStore = { events: EventRow[] };
 
-const dataDir = path.join(process.cwd(), "data");
+/**
+ * Папка хранения данных:
+ * - локально по умолчанию: ./data
+ * - в проде можно задать DATA_DIR (например /app/data для Railway Volume)
+ */
+const dataDir = (() => {
+  const raw = (process.env.DATA_DIR ?? "").trim();
+  if (!raw) return path.join(process.cwd(), "data");
+  return path.isAbsolute(raw) ? raw : path.join(process.cwd(), raw);
+})();
 const storePath = path.join(dataDir, "events.json");
 
 let mem: FileStore | null = null;

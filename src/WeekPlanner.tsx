@@ -130,6 +130,9 @@ function durationFromTimes(startM: number, endM: number): number {
   return clamp(Math.round((end - start) / SNAP) * SNAP, SNAP, 24 * 60 - start);
 }
 
+const MIN_CREATE_LEAD_HOURS = 10;
+const MIN_CREATE_LEAD_MS = MIN_CREATE_LEAD_HOURS * 60 * 60 * 1000;
+
 function normalizeToGrid(ev: ApiEvent): ApiEvent {
   const start = clamp(snapMin(ev.start_minutes), 0, 24 * 60 - SNAP);
   const dur = clamp(Math.round(ev.duration_minutes / SNAP) * SNAP, SNAP, 24 * 60 - start);
@@ -439,6 +442,13 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       const day_span = clamp(spanRaw, 1, 7 - day_index);
 
       if (editor.mode === "create") {
+        const startAt = new Date(`${startIso}T00:00:00`);
+        startAt.setMinutes(startAt.getMinutes() + editor.start_minutes);
+        const leadMs = startAt.getTime() - Date.now();
+        if (leadMs < MIN_CREATE_LEAD_MS) {
+          setErr(`Нельзя добавить дело раньше чем за ${MIN_CREATE_LEAD_HOURS} часов до начала.`);
+          return;
+        }
         await api.createEvent(
           {
             week_monday: monday,

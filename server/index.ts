@@ -141,6 +141,18 @@ function mondayISO(d: Date): string {
   return x.toISOString().slice(0, 10);
 }
 
+const MIN_CREATE_LEAD_HOURS = 10;
+const MIN_CREATE_LEAD_MS = MIN_CREATE_LEAD_HOURS * 60 * 60 * 1000;
+
+function eventStartAt(weekMonday: string, dayIndex: number, startMinutes: number): Date | null {
+  const base = new Date(`${weekMonday}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return null;
+  if (!Number.isFinite(dayIndex) || !Number.isFinite(startMinutes)) return null;
+  base.setDate(base.getDate() + dayIndex);
+  base.setMinutes(base.getMinutes() + startMinutes);
+  return base;
+}
+
 const app = express();
 app.use(
   cors({
@@ -206,6 +218,15 @@ app.post("/api/events", (req, res) => {
   if (typeof b.duration_minutes !== "number" || b.duration_minutes < 15 || b.duration_minutes > 24 * 60)
     return res.status(400).json({ error: "duration_minutes" });
   if (typeof b.title !== "string" || !b.title.trim()) return res.status(400).json({ error: "title" });
+  const startAt = eventStartAt(b.week_monday, b.day_index, b.start_minutes);
+  if (!startAt) return res.status(400).json({ error: "start_at" });
+  const diff = startAt.getTime() - Date.now();
+  if (diff < MIN_CREATE_LEAD_MS) {
+    return res.status(400).json({
+      error: "min_lead_time_10h",
+      message: `Дело можно добавить минимум за ${MIN_CREATE_LEAD_HOURS} часов до начала.`,
+    });
+  }
   const titleTrim = b.title.trim().slice(0, 500);
   const commentTrim = typeof b.comment === "string" ? b.comment.trim().slice(0, 1000) : "";
   const CARD_COLORS = new Set(["slate", "sky", "violet", "rose", "amber", "teal", "coral"]);
