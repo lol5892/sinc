@@ -12,6 +12,10 @@ export type ApiEvent = {
   confirmation_required: boolean;
   confirmed_at: string | null;
   confirmed_by_tg_id: number | null;
+  completion_requested_at: string | null;
+  completion_requested_by_tg_id: number | null;
+  completed_at: string | null;
+  completed_by_tg_id: number | null;
   declined_at: string | null;
   declined_by_tg_id: number | null;
   call_clicked_at: string | null;

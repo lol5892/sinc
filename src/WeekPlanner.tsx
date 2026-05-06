@@ -600,7 +600,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
               return (
                 <article
                   key={e.id}
-                  className={`wp-block premium ${mine ? "mine" : "theirs"} card-c-${normalizeCardColor(e.card_color)}`}
+                  className={`wp-block premium ${mine ? "mine" : "theirs"} card-c-${normalizeCardColor(e.card_color)}${e.completed_at ? " completed" : ""}`}
                   style={{ top, height, left: `${leftPct}%`, width: `${widthPct}%` }}
                   onPointerDown={(ev) => onBlockPointerDown(ev, e)}
                   onClick={(ev) => onBlockTap(ev, e)}
@@ -621,6 +621,11 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                       {fmtClock(e.start_minutes)} — {fmtClock(e.start_minutes + e.duration_minutes)}
                       {e.day_span > 1 ? ` · ${e.day_span} дн.` : ""}
                     </div>
+                    {e.completed_at && (
+                      <div className="wp-block-done">
+                        ✅ Завершено {new Date(e.completed_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    )}
                   </div>
                   {e.comment.trim() && <span className="wp-block-comment-dot" />}
                 </article>
@@ -909,6 +914,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
               {bubbleEvent.confirmed_at ? "Подтверждено" : "Ждёт подтверждения"}
             </div>
           )}
+          {bubbleEvent.completed_at && <div className="wp-confirm-status done">Завершено: {new Date(bubbleEvent.completed_at).toLocaleString("ru-RU")}</div>}
           <div className={`wp-info-comment ${bubbleEvent.comment.trim() ? "" : "wp-info-empty"}`}>
             {bubbleEvent.comment.trim() || "Комментария пока нет"}
           </div>

@@ -509,6 +509,25 @@
   -webkit-box-orient: vertical;
 }
 
+.wp-block.completed {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, #22c55e 50%, transparent),
+    0 1px 2px var(--wp-shadow),
+    0 10px 28px -8px var(--wp-shadow);
+}
+
+.wp-block-done {
+  margin-top: 0.24rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: color-mix(in srgb, #16a34a 75%, #ffffff);
+  background: color-mix(in srgb, #16a34a 14%, transparent);
+  border: 1px solid color-mix(in srgb, #16a34a 35%, transparent);
+  border-radius: 0.45rem;
+  padding: 0.12rem 0.28rem;
+  width: fit-content;
+}
+
 .wp-block-comment-dot {
   position: absolute;
   right: 0.44rem;

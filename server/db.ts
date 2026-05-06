@@ -23,6 +23,10 @@ export type EventRow = {
   confirmation_message_id: number | null;
   /** JSON-строка массива доставленных сообщений [{ chat_id, message_id }] */
   confirmation_messages_json?: string | null;
+  completion_requested_at: string | null;
+  completion_requested_by_tg_id: number | null;
+  completed_at: string | null;
+  completed_by_tg_id: number | null;
   owner_tg_id: number;
   owner_name: string;
   card_color: string;
@@ -84,6 +88,14 @@ function normalizeDbRow(row: EventRow): EventRow {
       (row as unknown as Record<string, unknown>).confirmation_message_id == null
         ? null
         : asNum((row as unknown as Record<string, unknown>).confirmation_message_id),
+    completion_requested_by_tg_id:
+      (row as unknown as Record<string, unknown>).completion_requested_by_tg_id == null
+        ? null
+        : asNum((row as unknown as Record<string, unknown>).completion_requested_by_tg_id),
+    completed_by_tg_id:
+      (row as unknown as Record<string, unknown>).completed_by_tg_id == null
+        ? null
+        : asNum((row as unknown as Record<string, unknown>).completed_by_tg_id),
     owner_tg_id: asNum((row as unknown as Record<string, unknown>).owner_tg_id, 0),
     reminder_sent: asNum((row as unknown as Record<string, unknown>).reminder_sent, 0),
   };
@@ -142,6 +154,17 @@ function readDisk(): FileStore {
           typeof (e as Partial<EventRow>).confirmation_messages_json === "string"
             ? (e as Partial<EventRow>).confirmation_messages_json!
             : null,
+        completion_requested_at:
+          typeof (e as Partial<EventRow>).completion_requested_at === "string"
+            ? (e as Partial<EventRow>).completion_requested_at!
+            : null,
+        completion_requested_by_tg_id: Number.isFinite((e as Partial<EventRow>).completion_requested_by_tg_id)
+          ? (e as Partial<EventRow>).completion_requested_by_tg_id!
+          : null,
+        completed_at: typeof (e as Partial<EventRow>).completed_at === "string" ? (e as Partial<EventRow>).completed_at! : null,
+        completed_by_tg_id: Number.isFinite((e as Partial<EventRow>).completed_by_tg_id)
+          ? (e as Partial<EventRow>).completed_by_tg_id!
+          : null,
         owner_name:
           typeof (e as Partial<EventRow>).owner_name === "string" && (e as Partial<EventRow>).owner_name!.trim()
             ? (e as Partial<EventRow>).owner_name!.trim()
@@ -190,6 +213,10 @@ async function initPostgres() {
       confirmation_message_chat_id BIGINT NULL,
       confirmation_message_id BIGINT NULL,
       confirmation_messages_json TEXT NULL,
+      completion_requested_at TEXT NULL,
+      completion_requested_by_tg_id BIGINT NULL,
+      completed_at TEXT NULL,
+      completed_by_tg_id BIGINT NULL,
       owner_tg_id BIGINT NOT NULL,
       owner_name TEXT NOT NULL,
       card_color TEXT NOT NULL DEFAULT 'slate',
@@ -198,6 +225,10 @@ async function initPostgres() {
     )
   `);
   await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS confirmation_messages_json TEXT NULL`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS completion_requested_at TEXT NULL`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS completion_requested_by_tg_id BIGINT NULL`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS completed_at TEXT NULL`);
+  await pool.query(`ALTER TABLE events ADD COLUMN IF NOT EXISTS completed_by_tg_id BIGINT NULL`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS event_backups (
       day_key TEXT PRIMARY KEY,
@@ -255,12 +286,13 @@ export async function insertEvent(row: Omit<EventRow, "reminder_sent"> & { remin
           id, week_monday, day_index, day_span, start_minutes, duration_minutes, title, comment,
           confirmation_required, confirmed_at, confirmed_by_tg_id, declined_at, declined_by_tg_id,
           call_clicked_at, call_clicked_by_tg_id, confirmation_message_chat_id, confirmation_message_id,
-          confirmation_messages_json, owner_tg_id, owner_name, card_color, remind_at, reminder_sent
+          confirmation_messages_json, completion_requested_at, completion_requested_by_tg_id,
+          completed_at, completed_by_tg_id, owner_tg_id, owner_name, card_color, remind_at, reminder_sent
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8,
           $9, $10, $11, $12, $13,
           $14, $15, $16, $17,
-          $18, $19, $20, $21, $22, $23
+          $18, $19, $20, $21, $22, $23, $24, $25, $26
         )
       `,
       [
@@ -282,6 +314,10 @@ export async function insertEvent(row: Omit<EventRow, "reminder_sent"> & { remin
         row.confirmation_message_chat_id ?? null,
         row.confirmation_message_id ?? null,
         row.confirmation_messages_json ?? null,
+        row.completion_requested_at ?? null,
+        row.completion_requested_by_tg_id ?? null,
+        row.completed_at ?? null,
+        row.completed_by_tg_id ?? null,
         row.owner_tg_id,
         row.owner_name.trim() || `Пользователь ${row.owner_tg_id}`,
         row.card_color?.trim() || "slate",
@@ -304,6 +340,10 @@ export async function insertEvent(row: Omit<EventRow, "reminder_sent"> & { remin
     confirmation_message_chat_id: row.confirmation_message_chat_id ?? null,
     confirmation_message_id: row.confirmation_message_id ?? null,
     confirmation_messages_json: row.confirmation_messages_json ?? null,
+    completion_requested_at: row.completion_requested_at ?? null,
+    completion_requested_by_tg_id: row.completion_requested_by_tg_id ?? null,
+    completed_at: row.completed_at ?? null,
+    completed_by_tg_id: row.completed_by_tg_id ?? null,
     owner_name: row.owner_name.trim() || `Пользователь ${row.owner_tg_id}`,
     card_color: row.card_color?.trim() || "slate",
     remind_at: row.remind_at ?? null,
@@ -333,6 +373,10 @@ export async function updateEvent(
       | "confirmation_message_chat_id"
       | "confirmation_message_id"
       | "confirmation_messages_json"
+      | "completion_requested_at"
+      | "completion_requested_by_tg_id"
+      | "completed_at"
+      | "completed_by_tg_id"
       | "card_color"
       | "remind_at"
       | "reminder_sent"
@@ -367,6 +411,10 @@ export async function updateEvent(
   if (patch.confirmation_message_chat_id !== undefined) ev.confirmation_message_chat_id = patch.confirmation_message_chat_id;
   if (patch.confirmation_message_id !== undefined) ev.confirmation_message_id = patch.confirmation_message_id;
   if (patch.confirmation_messages_json !== undefined) ev.confirmation_messages_json = patch.confirmation_messages_json;
+  if (patch.completion_requested_at !== undefined) ev.completion_requested_at = patch.completion_requested_at;
+  if (patch.completion_requested_by_tg_id !== undefined) ev.completion_requested_by_tg_id = patch.completion_requested_by_tg_id;
+  if (patch.completed_at !== undefined) ev.completed_at = patch.completed_at;
+  if (patch.completed_by_tg_id !== undefined) ev.completed_by_tg_id = patch.completed_by_tg_id;
   if (patch.card_color !== undefined) ev.card_color = patch.card_color;
   if (patch.remind_at !== undefined) ev.remind_at = patch.remind_at;
   if (patch.reminder_sent !== undefined) ev.reminder_sent = patch.reminder_sent;
@@ -429,4 +477,20 @@ export async function saveDailyBackup(dayKey: string): Promise<boolean> {
     return (rowCount ?? 0) > 0;
   }
   return false;
+}
+
+export async function deleteCompletedOlderThan(cutoffIso: string): Promise<number> {
+  if (usePostgres) {
+    const { rowCount } = await getPool().query(
+      "DELETE FROM events WHERE completed_at IS NOT NULL AND completed_at <> '' AND completed_at < $1",
+      [cutoffIso],
+    );
+    return rowCount ?? 0;
+  }
+  const s = getStore();
+  const before = s.events.length;
+  s.events = s.events.filter((e) => !(e.completed_at && e.completed_at < cutoffIso));
+  const deleted = before - s.events.length;
+  if (deleted > 0) writeDisk(s);
+  return deleted;
 }

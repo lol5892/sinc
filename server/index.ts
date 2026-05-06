@@ -62,6 +62,18 @@ function confirmationKeyboard(eventId: string) {
   };
 }
 
+function doneKeyboard(eventId: string) {
+  return {
+    inline_keyboard: [[{ text: "✅ Сделано", callback_data: `done:${eventId}` }]],
+  };
+}
+
+function acceptDoneKeyboard(eventId: string) {
+  return {
+    inline_keyboard: [[{ text: "Принять", callback_data: `accept_done:${eventId}` }]],
+  };
+}
+
 type MsgRef = { chat_id: number; message_id: number };
 
 function parseMessageRefs(raw: string | null | undefined): MsgRef[] {
@@ -165,6 +177,22 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
       confirmation_messages_json: JSON.stringify(delivered),
     });
   }
+}
+
+function completionText(event: Awaited<ReturnType<typeof db.getEvent>>, requesterName: string): string {
+  if (!event) return "Дело не найдено";
+  const hh = String(Math.floor(event.start_minutes / 60)).padStart(2, "0");
+  const mm = String(event.start_minutes % 60).padStart(2, "0");
+  const doneAt = new Date().toLocaleString("ru-RU");
+  return (
+    `Отметка о выполнении дела:\n` +
+    `Название: ${event.title}\n` +
+    `Время: ${hh}:${mm}\n` +
+    `Комментарий: ${event.comment?.trim() || "без комментария"}\n` +
+    `Исполнитель: ${requesterName}\n` +
+    `Отмечено как выполнено: ${doneAt}\n\n` +
+    `Если всё ок — нажми «Принять».`
+  );
 }
 
 function assertAllowed(userId: number) {
@@ -321,6 +349,10 @@ app.post("/api/events", async (req, res) => {
     confirmation_message_chat_id: null,
     confirmation_message_id: null,
     confirmation_messages_json: null,
+    completion_requested_at: null,
+    completion_requested_by_tg_id: null,
+    completed_at: null,
+    completed_by_tg_id: null,
     owner_tg_id: user.id,
     owner_name: user.name,
     remind_at: b.remind_at && b.remind_at.length > 0 ? b.remind_at : null,
@@ -455,6 +487,16 @@ async function sendReminders(bot: Telegraf) {
   }
 }
 
+async function cleanupCompletedTasks() {
+  const cutoff = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const deleted = await db.deleteCompletedOlderThan(cutoff);
+    if (deleted > 0) console.log(`Удалено завершённых старше 5 дней: ${deleted}`);
+  } catch (e) {
+    console.error("Ошибка очистки завершённых дел:", e);
+  }
+}
+
 async function saveDailyBackupIfNeeded() {
   try {
     const created = await db.saveDailyBackup(todayISO());
@@ -520,7 +562,7 @@ async function main() {
       });
       await ctx.answerCbQuery("Подтверждено").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
-      await ctx.editMessageText(text).catch(() => {});
+      await ctx.editMessageText(text, { reply_markup: doneKeyboard(eventId) }).catch(() => {});
     });
 
     bot.action(/^decline:(.+)$/, async (ctx) => {
@@ -538,6 +580,69 @@ async function main() {
       await db.deleteEvent(eventId);
       await ctx.answerCbQuery("Отказано").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n❌ Отказано и удалено`;
+      await ctx.editMessageText(text).catch(() => {});
+    });
+
+    bot.action(/^done:(.+)$/, async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.answerCbQuery("Нет доступа").catch(() => {});
+        return;
+      }
+      const eventId = ctx.match[1];
+      const event = await db.getEvent(eventId);
+      if (!event) {
+        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
+        return;
+      }
+      if (!event.confirmed_at) {
+        await ctx.answerCbQuery("Сначала подтвердите дело").catch(() => {});
+        return;
+      }
+      if (event.owner_tg_id === userId) {
+        await ctx.answerCbQuery("Отметку делает исполнитель, не автор").catch(() => {});
+        return;
+      }
+      const requesterName = displayUserName(ctx.from ?? { id: userId });
+      await db.updateEvent(eventId, {
+        completion_requested_at: new Date().toISOString(),
+        completion_requested_by_tg_id: userId,
+      });
+      if (botForNotify) {
+        await botForNotify.telegram
+          .sendMessage(event.owner_tg_id, completionText(event, requesterName), {
+            reply_markup: acceptDoneKeyboard(eventId),
+          })
+          .catch((e) => console.error("Не удалось отправить запрос принятия автору:", e));
+      }
+      await ctx.answerCbQuery("Отправлено автору на принятие").catch(() => {});
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n🕓 Отмечено как выполнено, ждём принятия автора`;
+      await ctx.editMessageText(text).catch(() => {});
+    });
+
+    bot.action(/^accept_done:(.+)$/, async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.answerCbQuery("Нет доступа").catch(() => {});
+        return;
+      }
+      const eventId = ctx.match[1];
+      const event = await db.getEvent(eventId);
+      if (!event) {
+        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
+        return;
+      }
+      if (event.owner_tg_id !== userId) {
+        await ctx.answerCbQuery("Принять может только автор дела").catch(() => {});
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      await db.updateEvent(eventId, {
+        completed_at: nowIso,
+        completed_by_tg_id: event.completion_requested_by_tg_id ?? userId,
+      });
+      await ctx.answerCbQuery("Дело принято и завершено").catch(() => {});
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Принято автором (${new Date(nowIso).toLocaleString("ru-RU")})`;
       await ctx.editMessageText(text).catch(() => {});
     });
 
@@ -590,8 +695,14 @@ async function main() {
     void saveDailyBackupIfNeeded();
   });
 
+  // Ежечасно удаляем завершённые дела старше 5 дней.
+  cron.schedule("12 * * * *", () => {
+    void cleanupCompletedTasks();
+  });
+
   // И сразу один раз при старте (если за сегодня ещё не было snapshot).
   void saveDailyBackupIfNeeded();
+  void cleanupCompletedTasks();
 
   // Сначала HTTP — иначе при ошибке Telegram порт не откроется.
   app.listen(PORT, () => {
