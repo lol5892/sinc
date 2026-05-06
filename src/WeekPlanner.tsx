@@ -848,7 +848,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
               aria-label="Открыть изменение дела"
               onClick={() => openEditorForEvent(bubbleEvent)}
             >
-              <span aria-hidden />
+              <img src="/gear-settings.png" alt="" className="wp-gear-img" width={36} height={36} decoding="async" />
             </button>
           </div>
           <div className="wp-info-time">
