@@ -237,7 +237,7 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-const MIN_CREATE_LEAD_HOURS = 10;
+const MIN_CREATE_LEAD_HOURS = 2;
 const MIN_CREATE_LEAD_MS = MIN_CREATE_LEAD_HOURS * 60 * 60 * 1000;
 
 function eventStartAt(weekMonday: string, dayIndex: number, startMinutes: number): Date | null {
@@ -421,7 +421,7 @@ app.patch("/api/events/:id", async (req, res) => {
   if (patch.remind_at !== undefined) patch.reminder_sent = 0;
   if (typeof b.card_color === "string" && CARD_COLORS.has(b.card_color.trim())) patch.card_color = b.card_color.trim();
 
-  // Нельзя переносить дело так, чтобы старт был раньше, чем через 10 часов от текущего момента.
+  // Нельзя переносить дело так, чтобы старт был раньше, чем через MIN_CREATE_LEAD_HOURS от текущего момента.
   const effectiveDay = patch.day_index ?? event.day_index;
   const effectiveStart = patch.start_minutes ?? event.start_minutes;
   const effectiveStartAt = eventStartAt(event.week_monday, effectiveDay, effectiveStart);

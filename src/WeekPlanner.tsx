@@ -130,7 +130,7 @@ function durationFromTimes(startM: number, endM: number): number {
   return clamp(Math.round((end - start) / SNAP) * SNAP, SNAP, 24 * 60 - start);
 }
 
-const MIN_CREATE_LEAD_HOURS = 10;
+const MIN_CREATE_LEAD_HOURS = 2;
 const MIN_CREATE_LEAD_MS = MIN_CREATE_LEAD_HOURS * 60 * 60 * 1000;
 
 function eventStartAtLocal(weekMonday: string, dayIndex: number, startMinutes: number): Date {
