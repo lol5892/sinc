@@ -149,6 +149,13 @@ async function initPostgres() {
       reminder_sent INTEGER NOT NULL DEFAULT 0
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS event_backups (
+      day_key TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      events_json JSONB NOT NULL
+    )
+  `);
 }
 
 export async function initStore() {
@@ -341,4 +348,32 @@ export async function dueReminders(nowIso: string): Promise<EventRow[]> {
   return getStore().events.filter(
     (e) => e.reminder_sent === 0 && e.remind_at != null && e.remind_at !== "" && e.remind_at <= nowIso,
   );
+}
+
+export async function listAllEvents(): Promise<EventRow[]> {
+  if (usePostgres) {
+    const { rows } = await getPool().query<EventRow>("SELECT * FROM events ORDER BY week_monday, day_index, start_minutes");
+    return rows;
+  }
+  return [...getStore().events].sort((a, b) =>
+    a.week_monday.localeCompare(b.week_monday) || a.day_index - b.day_index || a.start_minutes - b.start_minutes,
+  );
+}
+
+/** Сохраняет 1 снимок в день. Возвращает true, если сегодня снимок создан впервые. */
+export async function saveDailyBackup(dayKey: string): Promise<boolean> {
+  if (usePostgres) {
+    const createdAt = new Date().toISOString();
+    const { rowCount } = await getPool().query(
+      `
+        INSERT INTO event_backups (day_key, created_at, events_json)
+        SELECT $1, $2, COALESCE(jsonb_agg(to_jsonb(e) ORDER BY e.week_monday, e.day_index, e.start_minutes), '[]'::jsonb)
+        FROM events e
+        ON CONFLICT (day_key) DO NOTHING
+      `,
+      [dayKey, createdAt],
+    );
+    return (rowCount ?? 0) > 0;
+  }
+  return false;
 }

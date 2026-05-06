@@ -141,6 +141,10 @@ function mondayISO(d: Date): string {
   return x.toISOString().slice(0, 10);
 }
 
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const MIN_CREATE_LEAD_HOURS = 10;
 const MIN_CREATE_LEAD_MS = MIN_CREATE_LEAD_HOURS * 60 * 60 * 1000;
 
@@ -367,6 +371,17 @@ async function sendReminders(bot: Telegraf) {
   }
 }
 
+async function saveDailyBackupIfNeeded() {
+  try {
+    const created = await db.saveDailyBackup(todayISO());
+    if (created) {
+      console.log("Ежедневный backup дел сохранён.");
+    }
+  } catch (e) {
+    console.error("Не удалось сохранить daily backup:", e);
+  }
+}
+
 async function main() {
   await db.initStore();
 
@@ -473,6 +488,14 @@ async function main() {
   cron.schedule("* * * * *", () => {
     if (bot) void sendReminders(bot);
   });
+
+  // Раз в день сохраняем снимок всех дел в БД backup-таблицу.
+  cron.schedule("17 3 * * *", () => {
+    void saveDailyBackupIfNeeded();
+  });
+
+  // И сразу один раз при старте (если за сегодня ещё не было snapshot).
+  void saveDailyBackupIfNeeded();
 
   // Сначала HTTP — иначе при ошибке Telegram порт не откроется.
   app.listen(PORT, () => {
