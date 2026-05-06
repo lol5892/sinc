@@ -94,7 +94,25 @@ function normalizeToGrid(ev: ApiEvent): ApiEvent {
   return { ...ev, day_index: day, day_span: span, start_minutes: start, duration_minutes: dur };
 }
 
+/** Текст, который передаётся в ярлык «Команды» для напоминания. */
+function remindersPayload(e: ApiEvent, weekMonday: string): string {
+  const dayDate = addDays(weekMonday, e.day_index);
+  const dateStr = dayDate.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+  const time = `${fmtClock(e.start_minutes)}–${fmtClock(e.start_minutes + e.duration_minutes)}`;
+  let s = `${e.title}\n${dateStr}, ${time}`;
+  if (e.comment.trim()) s += `\n${e.comment.trim().slice(0, 500)}`;
+  return s.slice(0, 4000);
+}
+
+/** Ссылка на запуск ярлыка с текстом (работает на iPhone из Mini App). */
+function remindersShortcutUrl(shortcutName: string, text: string): string {
+  const name = encodeURIComponent(shortcutName);
+  const t = encodeURIComponent(text);
+  return `shortcuts://run-shortcut?name=${name}&input=text&text=${t}`;
+}
+
 export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }: Props) {
+  const remindersShortcutName = (import.meta.env.VITE_REMINDERS_SHORTCUT_NAME as string | undefined)?.trim() ?? "";
   const [monday, setMonday] = useState(() => mondayISO(new Date()));
   const [events, setEvents] = useState<ApiEvent[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -450,6 +468,29 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                   onPointerDown={(ev) => onBlockPointerDown(ev, e)}
                   onClick={(ev) => onBlockTap(ev, e)}
                 >
+                  <button
+                    type="button"
+                    className="wp-remind-btn"
+                    title={
+                      remindersShortcutName
+                        ? "Открыть ярлык «Команды» и добавить в Напоминания"
+                        : "Настрой VITE_REMINDERS_SHORTCUT_NAME (ярлык Команды)"
+                    }
+                    aria-label="Добавить в напоминания iPhone"
+                    onPointerDown={(ev) => ev.stopPropagation()}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      if (!remindersShortcutName) {
+                        setErr(
+                          "Для кнопки «в Напоминания»: в приложении «Команды» создай ярлык с действием «Создать напоминание», прими на вход «Текст», назови ярлык (например SincRemind) и пропиши то же имя в VITE_REMINDERS_SHORTCUT_NAME в .env, затем пересобери и redeploy.",
+                        );
+                        return;
+                      }
+                      window.location.href = remindersShortcutUrl(remindersShortcutName, remindersPayload(e, monday));
+                    }}
+                  >
+                    <span className="wp-remind-check" aria-hidden />
+                  </button>
                   {mine && (
                     <>
                       <div className="resize-handle top" onPointerDown={(ev) => beginInteraction(ev, e, "resize-top")} />
