@@ -62,12 +62,6 @@ function confirmationKeyboard(eventId: string) {
   };
 }
 
-function doneKeyboard(eventId: string) {
-  return {
-    inline_keyboard: [[{ text: "✅ Сделано", callback_data: `done:${eventId}` }]],
-  };
-}
-
 function acceptDoneKeyboard(eventId: string) {
   return {
     inline_keyboard: [[{ text: "Принять", callback_data: `accept_done:${eventId}` }]],
@@ -497,6 +491,47 @@ async function cleanupCompletedTasks() {
   }
 }
 
+function eventEndAt(event: { week_monday: string; day_index: number; start_minutes: number; duration_minutes: number }): Date | null {
+  const start = eventStartAt(event.week_monday, event.day_index, event.start_minutes);
+  if (!start) return null;
+  const end = new Date(start);
+  end.setMinutes(end.getMinutes() + event.duration_minutes);
+  return end;
+}
+
+/** Для забывчивых: после окончания времени дела отправляем автору запрос "Принять". */
+async function autoRequestCompletionForOverdueTasks() {
+  if (!botForNotify) return;
+  try {
+    const rows = await db.listAllEvents();
+    const now = Date.now();
+    for (const ev of rows) {
+      if (!ev.confirmed_at) continue;
+      if (ev.completed_at) continue;
+      if (ev.completion_requested_at) continue;
+      const endAt = eventEndAt(ev);
+      if (!endAt) continue;
+      if (endAt.getTime() > now) continue;
+      await db.updateEvent(ev.id, {
+        completion_requested_at: endAt.toISOString(),
+        completion_requested_by_tg_id: null,
+      });
+      await botForNotify.telegram
+        .sendMessage(
+          ev.owner_tg_id,
+          `Дело автоматически отмечено как выполненное по времени.\n` +
+            `Название: ${ev.title}\n` +
+            `Окончание: ${endAt.toLocaleString("ru-RU")}\n\n` +
+            `Если всё ок — нажми «Принять».`,
+          { reply_markup: acceptDoneKeyboard(ev.id) },
+        )
+        .catch((e) => console.error("Не удалось отправить авто-запрос принятия:", e));
+    }
+  } catch (e) {
+    console.error("Ошибка авто-запроса завершения:", e);
+  }
+}
+
 async function saveDailyBackupIfNeeded() {
   try {
     const created = await db.saveDailyBackup(todayISO());
@@ -562,7 +597,7 @@ async function main() {
       });
       await ctx.answerCbQuery("Подтверждено").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
-      await ctx.editMessageText(text, { reply_markup: doneKeyboard(eventId) }).catch(() => {});
+      await ctx.editMessageText(text).catch(() => {});
     });
 
     bot.action(/^decline:(.+)$/, async (ctx) => {
@@ -700,8 +735,14 @@ async function main() {
     void cleanupCompletedTasks();
   });
 
+  // Каждые 5 минут: если время дела прошло, просим автора принять автозавершение.
+  cron.schedule("*/5 * * * *", () => {
+    void autoRequestCompletionForOverdueTasks();
+  });
+
   // И сразу один раз при старте (если за сегодня ещё не было snapshot).
   void saveDailyBackupIfNeeded();
+  void autoRequestCompletionForOverdueTasks();
   void cleanupCompletedTasks();
 
   // Сначала HTTP — иначе при ошибке Telegram порт не откроется.

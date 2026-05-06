@@ -536,6 +536,19 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     }
   };
 
+  const onEditorEnterBlur = (ev: React.KeyboardEvent) => {
+    if (ev.key !== "Enter") return;
+    const t = ev.target as EventTarget | null;
+    if (
+      t instanceof HTMLInputElement ||
+      t instanceof HTMLTextAreaElement ||
+      t instanceof HTMLSelectElement
+    ) {
+      ev.preventDefault();
+      t.blur();
+    }
+  };
+
   return (
     <div className={`wp ${theme === "dark" ? "theme-dark" : "theme-light"}`} onPointerDown={() => setInfoBubble(null)}>
       <header className="wp-head glass">
@@ -636,7 +649,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       </div>
       {editor && (
         <div className="wp-modal-root" role="dialog" aria-modal>
-          <div className="wp-modal">
+          <div className="wp-modal" onKeyDown={onEditorEnterBlur}>
             <h2>
               {editor.mode === "create"
                 ? "Новое дело"
@@ -863,7 +876,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       )}
       {commentEditorOpen && editor && (
         <div className="wp-sheet-root" role="dialog" aria-modal onPointerDown={() => setCommentEditorOpen(false)}>
-          <div className="wp-sheet" onPointerDown={(ev) => ev.stopPropagation()}>
+          <div className="wp-sheet" onPointerDown={(ev) => ev.stopPropagation()} onKeyDown={onEditorEnterBlur}>
             <h3>Комментарий к делу</h3>
             <label className="wp-field">
               Комментарий
