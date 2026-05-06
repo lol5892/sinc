@@ -31,6 +31,7 @@ export async function createEvent(
     title: string;
     comment?: string | null;
     remind_at?: string | null;
+    card_color?: string;
   },
   initData: string,
   devUserId?: string,
@@ -56,6 +57,7 @@ export async function patchEvent(
     comment: string | null;
     confirmation_required: boolean;
     remind_at: string | null;
+    card_color: string;
   }>,
   initData: string,
   devUserId?: string,

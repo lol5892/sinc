@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Имя ярлыка в приложении «Команды», который принимает текст и создаёт напоминание (см. .env.example). */
-  readonly VITE_REMINDERS_SHORTCUT_NAME?: string;
+  readonly VITE_DEV_USER_ID?: string;
+  readonly VITE_DEV_USER_NAME?: string;
 }
 
 interface ImportMeta {

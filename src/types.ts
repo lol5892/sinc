@@ -5,6 +5,8 @@ export type ApiEvent = {
   day_span: number;
   start_minutes: number;
   duration_minutes: number;
+  /** Ключ палитры карточки: slate, sky, violet, rose, amber, teal, coral */
+  card_color: string;
   title: string;
   comment: string;
   confirmation_required: boolean;

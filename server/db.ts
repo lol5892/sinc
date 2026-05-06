@@ -22,6 +22,7 @@ export type EventRow = {
   confirmation_message_id: number | null;
   owner_tg_id: number;
   owner_name: string;
+  card_color: string;
   remind_at: string | null;
   reminder_sent: number;
 };
@@ -69,6 +70,10 @@ function readDisk(): FileStore {
           typeof (e as Partial<EventRow>).owner_name === "string" && (e as Partial<EventRow>).owner_name!.trim()
             ? (e as Partial<EventRow>).owner_name!.trim()
             : `Пользователь ${e.owner_tg_id}`,
+        card_color:
+          typeof (e as Partial<EventRow>).card_color === "string" && (e as Partial<EventRow>).card_color!.trim()
+            ? (e as Partial<EventRow>).card_color!.trim()
+            : "slate",
       })),
     };
   } catch {
@@ -119,6 +124,7 @@ export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_se
     confirmation_message_chat_id: row.confirmation_message_chat_id ?? null,
     confirmation_message_id: row.confirmation_message_id ?? null,
     owner_name: row.owner_name.trim() || `Пользователь ${row.owner_tg_id}`,
+    card_color: row.card_color?.trim() || "slate",
     remind_at: row.remind_at ?? null,
     reminder_sent: row.reminder_sent ?? 0,
   });
@@ -145,6 +151,7 @@ export function updateEvent(
       | "call_clicked_by_tg_id"
       | "confirmation_message_chat_id"
       | "confirmation_message_id"
+      | "card_color"
       | "remind_at"
       | "reminder_sent"
     >
@@ -168,6 +175,7 @@ export function updateEvent(
   if (patch.call_clicked_by_tg_id !== undefined) ev.call_clicked_by_tg_id = patch.call_clicked_by_tg_id;
   if (patch.confirmation_message_chat_id !== undefined) ev.confirmation_message_chat_id = patch.confirmation_message_chat_id;
   if (patch.confirmation_message_id !== undefined) ev.confirmation_message_id = patch.confirmation_message_id;
+  if (patch.card_color !== undefined) ev.card_color = patch.card_color;
   if (patch.remind_at !== undefined) ev.remind_at = patch.remind_at;
   if (patch.reminder_sent !== undefined) ev.reminder_sent = patch.reminder_sent;
   writeDisk(s);

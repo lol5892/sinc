@@ -193,6 +193,7 @@ app.post("/api/events", (req, res) => {
     comment?: string | null;
     confirmation_required?: boolean;
     remind_at?: string | null;
+    card_color?: string;
   };
   if (!b.week_monday || !/^\d{4}-\d{2}-\d{2}$/.test(b.week_monday))
     return res.status(400).json({ error: "week_monday" });
@@ -207,6 +208,9 @@ app.post("/api/events", (req, res) => {
   if (typeof b.title !== "string" || !b.title.trim()) return res.status(400).json({ error: "title" });
   const titleTrim = b.title.trim().slice(0, 500);
   const commentTrim = typeof b.comment === "string" ? b.comment.trim().slice(0, 1000) : "";
+  const CARD_COLORS = new Set(["slate", "sky", "violet", "rose", "amber", "teal", "coral"]);
+  const cardColor =
+    typeof b.card_color === "string" && CARD_COLORS.has(b.card_color.trim()) ? b.card_color.trim() : "slate";
   const id = randomUUID();
   db.insertEvent({
     id,
@@ -217,6 +221,7 @@ app.post("/api/events", (req, res) => {
     duration_minutes: b.duration_minutes,
     title: titleTrim,
     comment: commentTrim,
+    card_color: cardColor,
     confirmation_required: true,
     confirmed_at: null,
     confirmed_by_tg_id: null,
@@ -261,13 +266,16 @@ app.patch("/api/events/:id", (req, res) => {
     comment: string | null;
     confirmation_required: boolean;
     remind_at: string | null;
+    card_color: string;
   }>;
+  const CARD_COLORS = new Set(["slate", "sky", "violet", "rose", "amber", "teal", "coral"]);
   if (event.owner_tg_id !== user.id) {
     const triesOwnerOnlyChange =
       "title" in b ||
       "comment" in b ||
       "confirmation_required" in b ||
       "remind_at" in b ||
+      "card_color" in b ||
       (typeof b.day_span === "number" && b.day_span !== event.day_span) ||
       (typeof b.duration_minutes === "number" && b.duration_minutes !== event.duration_minutes);
     if (triesOwnerOnlyChange) return res.status(403).json({ error: "owner_only" });
@@ -290,6 +298,7 @@ app.patch("/api/events/:id", (req, res) => {
   }
   if ("remind_at" in b) patch.remind_at = b.remind_at && String(b.remind_at).length ? String(b.remind_at) : null;
   if (patch.remind_at !== undefined) patch.reminder_sent = 0;
+  if (typeof b.card_color === "string" && CARD_COLORS.has(b.card_color.trim())) patch.card_color = b.card_color.trim();
 
   db.updateEvent(id, patch);
   return res.json({ ok: true });
