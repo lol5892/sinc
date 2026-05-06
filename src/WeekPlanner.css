@@ -530,11 +530,11 @@
   padding: 0;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, #0f172a 28%, #64748b);
-  background: radial-gradient(circle at 32% 22%, #3d4555 0%, #121418 58%, #0a0b0d 100%);
+  background: #64748b;
   cursor: pointer;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 1px 3px rgba(0, 0, 0, 0.2);
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 1px 3px rgba(0, 0, 0, 0.18);
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -546,10 +546,10 @@
 
 .wp-gear:hover,
 .wp-gear:focus-visible {
-  filter: brightness(1.08);
+  filter: brightness(1.06);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 2px 8px rgba(0, 0, 0, 0.22);
+    inset 0 1px 0 rgba(255, 255, 255, 0.26),
+    0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .wp-gear:active {
@@ -564,60 +564,74 @@
   pointer-events: none;
 }
 
-/* Обводка шестерёнки = как у карточки этого цвета */
+/* Круг под шестерёнкой = заливка и обводка как у карточки */
 .wp-gear.card-c-slate {
+  background: #64748b;
   border-color: color-mix(in srgb, #0f172a 28%, #64748b);
 }
 
 .wp-gear.card-c-sky {
+  background: #0284c7;
   border-color: color-mix(in srgb, #0c4a6e 35%, #0284c7);
 }
 
 .wp-gear.card-c-violet {
+  background: #7c3aed;
   border-color: color-mix(in srgb, #1e1b4b 32%, #7c3aed);
 }
 
 .wp-gear.card-c-rose {
+  background: #e11d48;
   border-color: color-mix(in srgb, #4c0519 28%, #e11d48);
 }
 
 .wp-gear.card-c-amber {
+  background: #f59e0b;
   border-color: color-mix(in srgb, #78350f 22%, #f59e0b);
 }
 
 .wp-gear.card-c-teal {
+  background: #0d9488;
   border-color: color-mix(in srgb, #042f2e 30%, #0d9488);
 }
 
 .wp-gear.card-c-coral {
+  background: #ea580c;
   border-color: color-mix(in srgb, #431407 26%, #ea580c);
 }
 
 .wp.theme-dark .wp-gear.card-c-slate {
+  background: #475569;
   border-color: #334155;
 }
 
 .wp.theme-dark .wp-gear.card-c-sky {
+  background: #0369a1;
   border-color: #0c4a6e;
 }
 
 .wp.theme-dark .wp-gear.card-c-violet {
+  background: #6d28d9;
   border-color: #4c1d95;
 }
 
 .wp.theme-dark .wp-gear.card-c-rose {
+  background: #be123c;
   border-color: #881337;
 }
 
 .wp.theme-dark .wp-gear.card-c-amber {
+  background: #f59e0b;
   border-color: #b45309;
 }
 
 .wp.theme-dark .wp-gear.card-c-teal {
+  background: #0f766e;
   border-color: #115e59;
 }
 
 .wp.theme-dark .wp-gear.card-c-coral {
+  background: #c2410c;
   border-color: #7c2d12;
 }
 
