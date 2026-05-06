@@ -938,11 +938,14 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             </div>
           )}
           {bubbleEvent.completed_at && <div className="wp-confirm-status done">Завершено: {new Date(bubbleEvent.completed_at).toLocaleString("ru-RU")}</div>}
-          {!bubbleEvent.completed_at && bubbleEvent.confirmed_at && !isMine(bubbleEvent) && (
+          {!bubbleEvent.completed_at &&
+            bubbleEvent.confirmed_at &&
+            bubbleEvent.completion_requested_at &&
+            !isMine(bubbleEvent) && (
             <button type="button" className="wp-done-btn" onClick={() => void markDoneFromBubble(bubbleEvent)}>
               ✅ Готово
             </button>
-          )}
+            )}
           <div className={`wp-info-comment ${bubbleEvent.comment.trim() ? "" : "wp-info-empty"}`}>
             {bubbleEvent.comment.trim() || "Комментария пока нет"}
           </div>

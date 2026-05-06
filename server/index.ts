@@ -68,10 +68,20 @@ function doneKeyboard(eventId: string) {
   };
 }
 
-function acceptDoneKeyboard(eventId: string) {
-  return {
-    inline_keyboard: [[{ text: "Принять", callback_data: `accept_done:${eventId}` }]],
-  };
+function donePromptText(event: Awaited<ReturnType<typeof db.getEvent>>, endAt: Date): string {
+  if (!event) return "Дело не найдено";
+  const hh = String(Math.floor(event.start_minutes / 60)).padStart(2, "0");
+  const mm = String(event.start_minutes % 60).padStart(2, "0");
+  const endStr = endAt.toLocaleString("ru-RU");
+  return (
+    `Пора закрыть дело ✨\n` +
+    `Название: ${event.title}\n` +
+    `Время: ${hh}:${mm}\n` +
+    `Комментарий: ${event.comment?.trim() || "без комментария"}\n\n` +
+    `Дело сделано? Нажми «Готово».\n` +
+    `Если не ответить в течение часа, оно закроется автоматически.\n` +
+    `Окончание по плану: ${endStr}`
+  );
 }
 
 type MsgRef = { chat_id: number; message_id: number };
@@ -179,38 +189,7 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
   }
 }
 
-function completionText(event: Awaited<ReturnType<typeof db.getEvent>>, requesterName: string): string {
-  if (!event) return "Дело не найдено";
-  const hh = String(Math.floor(event.start_minutes / 60)).padStart(2, "0");
-  const mm = String(event.start_minutes % 60).padStart(2, "0");
-  const doneAt = new Date().toLocaleString("ru-RU");
-  return (
-    `Отметка о выполнении дела:\n` +
-    `Название: ${event.title}\n` +
-    `Время: ${hh}:${mm}\n` +
-    `Комментарий: ${event.comment?.trim() || "без комментария"}\n` +
-    `Исполнитель: ${requesterName}\n` +
-    `Отмечено как выполнено: ${doneAt}\n\n` +
-    `Если всё ок — нажми «Принять».`
-  );
-}
-
-async function sendAcceptRequestToOwner(
-  event: Awaited<ReturnType<typeof db.getEvent>>,
-  requesterName: string,
-  requesterId: number | null,
-) {
-  if (!botForNotify || !event) return;
-  await db.updateEvent(event.id, {
-    completion_requested_at: new Date().toISOString(),
-    completion_requested_by_tg_id: requesterId,
-  });
-  await botForNotify.telegram
-    .sendMessage(event.owner_tg_id, completionText(event, requesterName), {
-      reply_markup: acceptDoneKeyboard(event.id),
-    })
-    .catch((e) => console.error("Не удалось отправить запрос принятия автору:", e));
-}
+// completion_requested_at: момент, когда исполнителю отправлен запрос "Дело сделано?".
 
 function assertAllowed(userId: number) {
   if (ALLOWED.size === 0) {
@@ -494,7 +473,15 @@ app.post("/api/events/:id/done", async (req, res) => {
   if (!event.confirmed_at) return res.status(400).json({ error: "not_confirmed" });
   if (event.completed_at) return res.status(400).json({ error: "already_completed" });
   if (event.owner_tg_id === user.id) return res.status(403).json({ error: "owner_cannot_mark_done" });
-  await sendAcceptRequestToOwner(event, user.name, user.id);
+  const endAt = eventEndAt(event);
+  if (!endAt || endAt.getTime() > Date.now()) return res.status(400).json({ error: "too_early_for_done" });
+  const nowIso = new Date().toISOString();
+  await db.updateEvent(id, {
+    completion_requested_at: event.completion_requested_at ?? nowIso,
+    completion_requested_by_tg_id: user.id,
+    completed_at: nowIso,
+    completed_by_tg_id: user.id,
+  });
   return res.json({ ok: true });
 });
 
@@ -549,11 +536,29 @@ async function autoRequestCompletionForOverdueTasks() {
     for (const ev of rows) {
       if (!ev.confirmed_at) continue;
       if (ev.completed_at) continue;
-      if (ev.completion_requested_at) continue;
       const endAt = eventEndAt(ev);
       if (!endAt) continue;
-      if (endAt.getTime() > now) continue;
-      await sendAcceptRequestToOwner(ev, "Автосистема", null);
+      if (!ev.completion_requested_at) {
+        if (endAt.getTime() > now) continue;
+        for (const uid of ALLOWED) {
+          if (uid === ev.owner_tg_id) continue;
+          await botForNotify.telegram
+            .sendMessage(uid, donePromptText(ev, endAt), { reply_markup: doneKeyboard(ev.id) })
+            .catch((e) => console.error("Не удалось отправить запрос 'Готово' исполнителю:", e));
+        }
+        await db.updateEvent(ev.id, {
+          completion_requested_at: new Date().toISOString(),
+          completion_requested_by_tg_id: null,
+        });
+        continue;
+      }
+      const requestedMs = new Date(ev.completion_requested_at).getTime();
+      if (!Number.isFinite(requestedMs)) continue;
+      if (now - requestedMs < 60 * 60 * 1000) continue;
+      await db.updateEvent(ev.id, {
+        completed_at: new Date().toISOString(),
+        completed_by_tg_id: ev.completed_by_tg_id ?? ev.owner_tg_id,
+      });
     }
   } catch (e) {
     console.error("Ошибка авто-запроса завершения:", e);
@@ -625,7 +630,7 @@ async function main() {
       });
       await ctx.answerCbQuery("Подтверждено").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
-      await ctx.editMessageText(text, { reply_markup: doneKeyboard(eventId) }).catch(() => {});
+      await ctx.editMessageText(text).catch(() => {});
     });
 
     bot.action(/^decline:(.+)$/, async (ctx) => {
@@ -662,40 +667,24 @@ async function main() {
         await ctx.answerCbQuery("Сначала подтвердите дело").catch(() => {});
         return;
       }
+      const endAt = eventEndAt(event);
+      if (!endAt || endAt.getTime() > Date.now()) {
+        await ctx.answerCbQuery("Кнопка «Готово» станет доступна после окончания времени дела").catch(() => {});
+        return;
+      }
       if (event.owner_tg_id === userId) {
         await ctx.answerCbQuery("Отметку делает исполнитель, не автор").catch(() => {});
         return;
       }
-      const requesterName = displayUserName(ctx.from ?? { id: userId });
-      await sendAcceptRequestToOwner(event, requesterName, userId);
-      await ctx.answerCbQuery("Отправлено автору на принятие").catch(() => {});
-      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n🕓 Отмечено как выполнено, ждём принятия автора`;
-      await ctx.editMessageText(text).catch(() => {});
-    });
-
-    bot.action(/^accept_done:(.+)$/, async (ctx) => {
-      const userId = ctx.from?.id;
-      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
-        await ctx.answerCbQuery("Нет доступа").catch(() => {});
-        return;
-      }
-      const eventId = ctx.match[1];
-      const event = await db.getEvent(eventId);
-      if (!event) {
-        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
-        return;
-      }
-      if (event.owner_tg_id !== userId) {
-        await ctx.answerCbQuery("Принять может только автор дела").catch(() => {});
-        return;
-      }
       const nowIso = new Date().toISOString();
       await db.updateEvent(eventId, {
+        completion_requested_at: event.completion_requested_at ?? nowIso,
+        completion_requested_by_tg_id: userId,
         completed_at: nowIso,
-        completed_by_tg_id: event.completion_requested_by_tg_id ?? userId,
+        completed_by_tg_id: userId,
       });
-      await ctx.answerCbQuery("Дело принято и завершено").catch(() => {});
-      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Принято автором (${new Date(nowIso).toLocaleString("ru-RU")})`;
+      await ctx.answerCbQuery("Дело завершено").catch(() => {});
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Выполнено (${new Date(nowIso).toLocaleString("ru-RU")})`;
       await ctx.editMessageText(text).catch(() => {});
     });
 
