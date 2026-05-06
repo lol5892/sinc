@@ -599,7 +599,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             <label className="wp-field">
               Что сделать
               <input
-                autoFocus
                 value={editor.title}
                 disabled={!!editor.readonlyDetails}
                 onChange={(e) => setEditor({ ...editor, title: e.target.value })}
@@ -818,7 +817,6 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             <label className="wp-field">
               Комментарий
               <textarea
-                autoFocus
                 value={editor.comment}
                 maxLength={1000}
                 onChange={(e) => setEditor({ ...editor, comment: e.target.value })}
