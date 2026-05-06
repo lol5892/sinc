@@ -52,18 +52,11 @@ function normalizePhoneForEntity(display: string): string {
   return display.trim() || "+";
 }
 
-/** Вторая кнопка — `tel:` как ссылка на номер в чате (на iPhone открывает набор). */
-function confirmationKeyboard(eventId: string, ownerName: string) {
-  const display = phoneForUserName(ownerName);
-  const intl = normalizePhoneForEntity(display);
-  const telUrl = intl.startsWith("+") ? `tel:${intl}` : `tel:+${intl.replace(/^\++/, "")}`;
-  const label = intl.length <= 64 ? intl : `${intl.slice(0, 61)}…`;
+/** Клавиатура подтверждения (без URL-кнопок, чтобы Telegram не отклонял сообщение). */
+function confirmationKeyboard(eventId: string) {
   return {
     inline_keyboard: [
-      [
-        { text: "Подтвердить", callback_data: `confirm:${eventId}` },
-        { text: label, url: telUrl },
-      ],
+      [{ text: "Подтвердить", callback_data: `confirm:${eventId}` }],
       [{ text: "Отказаться", callback_data: `decline:${eventId}` }],
     ],
   };
@@ -86,12 +79,13 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
   const event = db.getEvent(eventId);
   if (!event) return;
   const comment = event.comment?.trim() ? event.comment.trim() : "без комментария";
-  const text = `Нужно подтверждение дела:\nНазвание: ${title}\nВремя: ${when}\nКомментарий: ${comment}\nДобавил: ${creator.name}`;
+  const phone = phoneForUserName(event.owner_name);
+  const text = `Нужно подтверждение дела:\nНазвание: ${title}\nВремя: ${when}\nКомментарий: ${comment}\nДобавил: ${creator.name}\nТелефон: ${phone}`;
   for (const uid of ALLOWED) {
     if (uid === creator.id) continue;
     try {
       const message = await botForNotify.telegram.sendMessage(uid, text, {
-        reply_markup: confirmationKeyboard(eventId, event.owner_name),
+        reply_markup: confirmationKeyboard(eventId),
       });
       db.updateEvent(eventId, {
         confirmation_message_chat_id: message.chat.id,
