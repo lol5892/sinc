@@ -62,6 +62,12 @@ function confirmationKeyboard(eventId: string) {
   };
 }
 
+function doneKeyboard(eventId: string) {
+  return {
+    inline_keyboard: [[{ text: "Готово", callback_data: `done:${eventId}` }]],
+  };
+}
+
 function acceptDoneKeyboard(eventId: string) {
   return {
     inline_keyboard: [[{ text: "Принять", callback_data: `accept_done:${eventId}` }]],
@@ -187,6 +193,23 @@ function completionText(event: Awaited<ReturnType<typeof db.getEvent>>, requeste
     `Отмечено как выполнено: ${doneAt}\n\n` +
     `Если всё ок — нажми «Принять».`
   );
+}
+
+async function sendAcceptRequestToOwner(
+  event: Awaited<ReturnType<typeof db.getEvent>>,
+  requesterName: string,
+  requesterId: number | null,
+) {
+  if (!botForNotify || !event) return;
+  await db.updateEvent(event.id, {
+    completion_requested_at: new Date().toISOString(),
+    completion_requested_by_tg_id: requesterId,
+  });
+  await botForNotify.telegram
+    .sendMessage(event.owner_tg_id, completionText(event, requesterName), {
+      reply_markup: acceptDoneKeyboard(event.id),
+    })
+    .catch((e) => console.error("Не удалось отправить запрос принятия автору:", e));
 }
 
 function assertAllowed(userId: number) {
@@ -456,6 +479,25 @@ app.delete("/api/events/:id", async (req, res) => {
   return res.json({ ok: true });
 });
 
+app.post("/api/events/:id/done", async (req, res) => {
+  let user: AuthUser;
+  try {
+    user = authUser(req);
+  } catch (e) {
+    const m = (e as Error).message;
+    if (m === "forbidden") return res.status(403).json({ error: "forbidden" });
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const id = req.params.id;
+  const event = await db.getEvent(id);
+  if (!event) return res.status(404).json({ error: "not_found" });
+  if (!event.confirmed_at) return res.status(400).json({ error: "not_confirmed" });
+  if (event.completed_at) return res.status(400).json({ error: "already_completed" });
+  if (event.owner_tg_id === user.id) return res.status(403).json({ error: "owner_cannot_mark_done" });
+  await sendAcceptRequestToOwner(event, user.name, user.id);
+  return res.json({ ok: true });
+});
+
 app.use((req, res, next) => {
   if (req.method !== "GET" && req.method !== "HEAD") return next();
   if (req.path.startsWith("/api")) return next();
@@ -499,7 +541,6 @@ function eventEndAt(event: { week_monday: string; day_index: number; start_minut
   return end;
 }
 
-/** Для забывчивых: после окончания времени дела отправляем автору запрос "Принять". */
 async function autoRequestCompletionForOverdueTasks() {
   if (!botForNotify) return;
   try {
@@ -512,20 +553,7 @@ async function autoRequestCompletionForOverdueTasks() {
       const endAt = eventEndAt(ev);
       if (!endAt) continue;
       if (endAt.getTime() > now) continue;
-      await db.updateEvent(ev.id, {
-        completion_requested_at: endAt.toISOString(),
-        completion_requested_by_tg_id: null,
-      });
-      await botForNotify.telegram
-        .sendMessage(
-          ev.owner_tg_id,
-          `Дело автоматически отмечено как выполненное по времени.\n` +
-            `Название: ${ev.title}\n` +
-            `Окончание: ${endAt.toLocaleString("ru-RU")}\n\n` +
-            `Если всё ок — нажми «Принять».`,
-          { reply_markup: acceptDoneKeyboard(ev.id) },
-        )
-        .catch((e) => console.error("Не удалось отправить авто-запрос принятия:", e));
+      await sendAcceptRequestToOwner(ev, "Автосистема", null);
     }
   } catch (e) {
     console.error("Ошибка авто-запроса завершения:", e);
@@ -597,7 +625,7 @@ async function main() {
       });
       await ctx.answerCbQuery("Подтверждено").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Подтверждено`;
-      await ctx.editMessageText(text).catch(() => {});
+      await ctx.editMessageText(text, { reply_markup: doneKeyboard(eventId) }).catch(() => {});
     });
 
     bot.action(/^decline:(.+)$/, async (ctx) => {
@@ -639,17 +667,7 @@ async function main() {
         return;
       }
       const requesterName = displayUserName(ctx.from ?? { id: userId });
-      await db.updateEvent(eventId, {
-        completion_requested_at: new Date().toISOString(),
-        completion_requested_by_tg_id: userId,
-      });
-      if (botForNotify) {
-        await botForNotify.telegram
-          .sendMessage(event.owner_tg_id, completionText(event, requesterName), {
-            reply_markup: acceptDoneKeyboard(eventId),
-          })
-          .catch((e) => console.error("Не удалось отправить запрос принятия автору:", e));
-      }
+      await sendAcceptRequestToOwner(event, requesterName, userId);
       await ctx.answerCbQuery("Отправлено автору на принятие").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n🕓 Отмечено как выполнено, ждём принятия автора`;
       await ctx.editMessageText(text).catch(() => {});

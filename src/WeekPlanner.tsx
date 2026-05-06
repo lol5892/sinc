@@ -536,6 +536,16 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     }
   };
 
+  const markDoneFromBubble = async (ev: ApiEvent) => {
+    try {
+      await api.markDone(ev.id, initData, devUserId, devUserName);
+      setInfoBubble(null);
+      void load();
+    } catch (e) {
+      setErr(String(e));
+    }
+  };
+
   const onEditorEnterBlur = (ev: React.KeyboardEvent) => {
     if (ev.key !== "Enter") return;
     const t = ev.target as EventTarget | null;
@@ -928,6 +938,11 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             </div>
           )}
           {bubbleEvent.completed_at && <div className="wp-confirm-status done">Завершено: {new Date(bubbleEvent.completed_at).toLocaleString("ru-RU")}</div>}
+          {!bubbleEvent.completed_at && bubbleEvent.confirmed_at && !isMine(bubbleEvent) && (
+            <button type="button" className="wp-done-btn" onClick={() => void markDoneFromBubble(bubbleEvent)}>
+              ✅ Готово
+            </button>
+          )}
           <div className={`wp-info-comment ${bubbleEvent.comment.trim() ? "" : "wp-info-empty"}`}>
             {bubbleEvent.comment.trim() || "Комментария пока нет"}
           </div>

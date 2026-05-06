@@ -78,3 +78,11 @@ export async function deleteEvent(id: string, initData: string, devUserId?: stri
   });
   if (!r.ok) throw new Error(await r.text());
 }
+
+export async function markDone(id: string, initData: string, devUserId?: string, devUserName?: string): Promise<void> {
+  const r = await fetch(`/api/events/${encodeURIComponent(id)}/done`, {
+    method: "POST",
+    headers: headers(initData, devUserId, devUserName),
+  });
+  if (!r.ok) throw new Error(await r.text());
+}

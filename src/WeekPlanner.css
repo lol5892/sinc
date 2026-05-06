@@ -646,6 +646,20 @@
   color: #2f6b3c;
 }
 
+.wp-done-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.5rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #22c55e 45%, var(--wp-line));
+  background: color-mix(in srgb, #22c55e 10%, var(--wp-panel));
+  color: color-mix(in srgb, #16a34a 80%, var(--wp-fg));
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .wp-inline-input {
   width: 100%;
   height: 100%;
