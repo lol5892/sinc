@@ -608,7 +608,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             </label>
             {!editor.readonlyDetails && (
               <div className="wp-color-field">
-                <span className="wp-color-label">Цвет на сетке</span>
+                <span className="wp-color-label">Цвет</span>
                 <div className="wp-color-swatches" role="listbox" aria-label="Цвет карточки">
                   {CARD_PALETTE.map((p) => (
                     <button
@@ -711,72 +711,69 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                 />
               </label>
             </div>
-            {!editor.readonlyDetails && !editor.showEndDate && (
-              <button
-                type="button"
-                className="wp-add-range-btn"
-                onClick={() =>
-                  setEditor((ed) => {
-                    if (!ed) return ed;
-                    return {
-                      ...ed,
-                      showEndDate: true,
-                      endDateIso: ed.endDateIso >= ed.startDateIso ? ed.endDateIso : ed.startDateIso,
-                    };
-                  })
-                }
-              >
-                <span className="wp-add-range-check" aria-hidden />
-                Добавить дату окончания (несколько дней)
-              </button>
-            )}
-            {!editor.readonlyDetails && editor.showEndDate && (
-              <label className="wp-field">
-                Дата окончания
-                <div className="wp-end-date-row">
-                  <input
-                    type="date"
-                    min={editor.startDateIso}
-                    max={ymdLocal(addDays(monday, 6))}
-                    value={editor.endDateIso}
-                    onChange={(ev) => {
-                      let v = ev.target.value;
-                      const sun = ymdLocal(addDays(monday, 6));
-                      if (v < editor.startDateIso) v = editor.startDateIso;
-                      if (v > sun) v = sun;
-                      setEditor((ed) => {
-                        if (!ed) return ed;
-                        const di = dayIndexInWeek(monday, ed.startDateIso);
-                        const span = daysSpanInclusive(ed.startDateIso, v);
-                        return {
-                          ...ed,
-                          endDateIso: v,
-                          day_index: di,
-                          day_span: clamp(span, 1, 7 - di),
-                        };
-                      });
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="wp-btn ghost wp-end-date-remove"
-                    onClick={() =>
-                      setEditor((ed) => {
-                        if (!ed) return ed;
-                        return {
-                          ...ed,
-                          showEndDate: false,
-                          endDateIso: ed.startDateIso,
-                          day_span: 1,
-                          day_index: dayIndexInWeek(monday, ed.startDateIso),
-                        };
-                      })
-                    }
-                  >
-                    Убрать
-                  </button>
+            {!editor.readonlyDetails && (
+              <div className="wp-multiday">
+                <div className="wp-multiday-row">
+                  <span className="wp-multiday-label">Несколько дней</span>
+                  <label className="wp-switch">
+                    <input
+                      type="checkbox"
+                      className="wp-switch-input"
+                      checked={editor.showEndDate}
+                      aria-label="Несколько дней: показать дату окончания"
+                      onChange={(ev) => {
+                        const on = ev.target.checked;
+                        setEditor((ed) => {
+                          if (!ed) return ed;
+                          if (!on) {
+                            return {
+                              ...ed,
+                              showEndDate: false,
+                              endDateIso: ed.startDateIso,
+                              day_span: 1,
+                              day_index: dayIndexInWeek(monday, ed.startDateIso),
+                            };
+                          }
+                          return {
+                            ...ed,
+                            showEndDate: true,
+                            endDateIso: ed.endDateIso >= ed.startDateIso ? ed.endDateIso : ed.startDateIso,
+                          };
+                        });
+                      }}
+                    />
+                    <span className="wp-switch-track" aria-hidden />
+                  </label>
                 </div>
-              </label>
+                {editor.showEndDate && (
+                  <label className="wp-field wp-field-tight">
+                    <span className="wp-field-sublabel">Окончание</span>
+                    <input
+                      type="date"
+                      min={editor.startDateIso}
+                      max={ymdLocal(addDays(monday, 6))}
+                      value={editor.endDateIso}
+                      onChange={(ev) => {
+                        let v = ev.target.value;
+                        const sun = ymdLocal(addDays(monday, 6));
+                        if (v < editor.startDateIso) v = editor.startDateIso;
+                        if (v > sun) v = sun;
+                        setEditor((ed) => {
+                          if (!ed) return ed;
+                          const di = dayIndexInWeek(monday, ed.startDateIso);
+                          const span = daysSpanInclusive(ed.startDateIso, v);
+                          return {
+                            ...ed,
+                            endDateIso: v,
+                            day_index: di,
+                            day_span: clamp(span, 1, 7 - di),
+                          };
+                        });
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
             )}
             {editor.readonlyDetails && editor.day_span > 1 && (
               <p className="wp-modal-note">
