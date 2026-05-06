@@ -43,6 +43,15 @@ function phoneForUserName(name: string): string {
   return "8960-008-48-43";
 }
 
+/** Нормализованный номер для сущности phone_number (как в обычной переписке Telegram). */
+function normalizePhoneForEntity(display: string): string {
+  const digits = display.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("8")) return `+7${digits.slice(1)}`;
+  if (digits.length === 11 && digits.startsWith("7")) return `+${digits}`;
+  if (digits.length > 0) return `+${digits}`;
+  return display.trim() || "+";
+}
+
 function confirmationKeyboard(eventId: string, mode: "initial" | "after-call" = "initial") {
   const rows = [[{ text: "Подтвердить", callback_data: `confirm:${eventId}` }]];
   rows.push(
@@ -363,8 +372,13 @@ async function main() {
       await ctx
         .editMessageReplyMarkup(confirmationKeyboard(event.id, "after-call"))
         .catch((e) => console.error("Не удалось заменить кнопки после звонка", e));
-      const phone = phoneForUserName(event.owner_name);
-      await ctx.reply(`Телефон автора: ${phone}\nНажми на номер, чтобы сразу открыть звонок.`);
+      const phoneDisplay = phoneForUserName(event.owner_name);
+      const phoneEntity = normalizePhoneForEntity(phoneDisplay);
+      const prefix = "Позвонить автору:\n";
+      const text = prefix + phoneEntity;
+      await ctx.reply(text, {
+        entities: [{ type: "phone_number", offset: prefix.length, length: phoneEntity.length }],
+      });
       await ctx.answerCbQuery("Показываю номер автора").catch(() => {});
     });
 
