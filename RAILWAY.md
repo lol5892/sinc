@@ -54,6 +54,8 @@
 1. В проекте Railway добавь **Volume**, смонтируй в `/app/data` (или путь из документации Railway для твоего рантайма).
 2. В **Variables** добавь `DATA_DIR=/app/data`.
 
+Альтернатива (предпочтительно): добавить в проект **Postgres**. Тогда Railway автоматически выдаст `DATABASE_URL`, и приложение начнёт хранить дела в БД.
+
 ## 6. Telegram (BotFather)
 
 1. @BotFather → твой бот → настройки **Mini App / Menu Button / домен**.

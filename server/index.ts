@@ -76,7 +76,7 @@ async function notifyOthersInFamily(creatorId: number, text: string) {
 
 async function requestConfirmationFromOthers(creator: AuthUser, eventId: string, title: string, when: string) {
   if (!botForNotify || ALLOWED.size < 2) return;
-  const event = db.getEvent(eventId);
+  const event = await db.getEvent(eventId);
   if (!event) return;
   const comment = event.comment?.trim() ? event.comment.trim() : "без комментария";
   const phone = phoneForUserName(event.owner_name);
@@ -93,7 +93,7 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
       const message = await botForNotify.telegram.sendMessage(uid, text, {
         reply_markup: confirmationKeyboard(eventId),
       });
-      db.updateEvent(eventId, {
+      await db.updateEvent(eventId, {
         confirmation_message_chat_id: message.chat.id,
         confirmation_message_id: message.message_id,
       });
@@ -171,7 +171,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/week", (req, res) => {
+app.get("/api/week", async (req, res) => {
   let user: AuthUser;
   try {
     user = authUser(req);
@@ -180,13 +180,13 @@ app.get("/api/week", (req, res) => {
   }
   const mon = typeof req.query.monday === "string" ? req.query.monday : mondayISO(new Date());
   if (!/^\d{4}-\d{2}-\d{2}$/.test(mon)) return res.status(400).json({ error: "bad_monday" });
-  const events = db
-    .listEventsForWeek(mon)
-    .filter((event) => event.owner_tg_id === user.id || !event.confirmation_required || Boolean(event.confirmed_at));
+  const events = (await db.listEventsForWeek(mon)).filter(
+    (event) => event.owner_tg_id === user.id || !event.confirmation_required || Boolean(event.confirmed_at),
+  );
   return res.json({ monday: mon, events });
 });
 
-app.post("/api/events", (req, res) => {
+app.post("/api/events", async (req, res) => {
   let user: AuthUser;
   try {
     user = authUser(req);
@@ -233,7 +233,7 @@ app.post("/api/events", (req, res) => {
   const cardColor =
     typeof b.card_color === "string" && CARD_COLORS.has(b.card_color.trim()) ? b.card_color.trim() : "slate";
   const id = randomUUID();
-  db.insertEvent({
+  await db.insertEvent({
     id,
     week_monday: b.week_monday,
     day_index: b.day_index,
@@ -265,7 +265,7 @@ app.post("/api/events", (req, res) => {
   return res.json({ id });
 });
 
-app.patch("/api/events/:id", (req, res) => {
+app.patch("/api/events/:id", async (req, res) => {
   let user: AuthUser;
   try {
     user = authUser(req);
@@ -275,7 +275,7 @@ app.patch("/api/events/:id", (req, res) => {
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  const event = db.getEvent(id);
+  const event = await db.getEvent(id);
   if (!event) return res.status(404).json({ error: "not_found" });
 
   const b = req.body as Partial<{
@@ -321,11 +321,11 @@ app.patch("/api/events/:id", (req, res) => {
   if (patch.remind_at !== undefined) patch.reminder_sent = 0;
   if (typeof b.card_color === "string" && CARD_COLORS.has(b.card_color.trim())) patch.card_color = b.card_color.trim();
 
-  db.updateEvent(id, patch);
+  await db.updateEvent(id, patch);
   return res.json({ ok: true });
 });
 
-app.delete("/api/events/:id", (req, res) => {
+app.delete("/api/events/:id", async (req, res) => {
   let user: AuthUser;
   try {
     user = authUser(req);
@@ -335,10 +335,10 @@ app.delete("/api/events/:id", (req, res) => {
     return res.status(401).json({ error: "unauthorized" });
   }
   const id = req.params.id;
-  const event = db.getEvent(id);
+  const event = await db.getEvent(id);
   if (!event) return res.status(404).json({ error: "not_found" });
   if (event.owner_tg_id !== user.id) return res.status(403).json({ error: "owner_only" });
-  db.deleteEvent(id);
+  await db.deleteEvent(id);
   return res.json({ ok: true });
 });
 
@@ -352,7 +352,7 @@ app.use((req, res, next) => {
 
 async function sendReminders(bot: Telegraf) {
   const now = new Date().toISOString();
-  const rows = db.dueReminders(now);
+  const rows = await db.dueReminders(now);
   for (const ev of rows) {
     const when = `${String(Math.floor(ev.start_minutes / 60)).padStart(2, "0")}:${String(ev.start_minutes % 60).padStart(2, "0")}`;
     const text = `Напоминание: «${ev.title}» (${when}, день ${ev.day_index + 1})`;
@@ -363,12 +363,12 @@ async function sendReminders(bot: Telegraf) {
         console.error("sendMessage", uid, e);
       }
     }
-    db.updateEvent(ev.id, { reminder_sent: 1 });
+    await db.updateEvent(ev.id, { reminder_sent: 1 });
   }
 }
 
 async function main() {
-  db.initStore();
+  await db.initStore();
 
   let bot: Telegraf | null = null;
   if (BOT_TOKEN) {
@@ -397,12 +397,12 @@ async function main() {
         return;
       }
       const eventId = ctx.match[1];
-      const event = db.getEvent(eventId);
+      const event = await db.getEvent(eventId);
       if (!event) {
         await ctx.answerCbQuery("Дело не найдено").catch(() => {});
         return;
       }
-      db.updateEvent(eventId, {
+      await db.updateEvent(eventId, {
         confirmation_required: true,
         confirmed_at: new Date().toISOString(),
         confirmed_by_tg_id: userId,
@@ -419,12 +419,12 @@ async function main() {
         return;
       }
       const eventId = ctx.match[1];
-      const event = db.getEvent(eventId);
+      const event = await db.getEvent(eventId);
       if (!event) {
         await ctx.answerCbQuery("Дело не найдено").catch(() => {});
         return;
       }
-      db.deleteEvent(eventId);
+      await db.deleteEvent(eventId);
       await ctx.answerCbQuery("Отказано").catch(() => {});
       const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n❌ Отказано и удалено`;
       await ctx.editMessageText(text).catch(() => {});
@@ -452,7 +452,7 @@ async function main() {
     if (WEB_APP_URL) {
       await bot.telegram
         .setChatMenuButton({
-          menu_button: {
+          menuButton: {
             type: "web_app",
             text: "Start",
             web_app: { url: WEB_APP_URL },

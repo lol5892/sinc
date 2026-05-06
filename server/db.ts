@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { Pool } from "pg";
 
 /** Хранение в JSON-файле — без нативного SQLite (не ломается при смене версии Node на Windows). */
 export type EventRow = {
@@ -42,6 +43,25 @@ const dataDir = (() => {
 const storePath = path.join(dataDir, "events.json");
 
 let mem: FileStore | null = null;
+let pgPool: Pool | null = null;
+let usePostgres = false;
+
+function wantPostgres(): boolean {
+  return Boolean((process.env.DATABASE_URL ?? "").trim());
+}
+
+function getPool(): Pool {
+  if (!pgPool) {
+    const connectionString = (process.env.DATABASE_URL ?? "").trim();
+    if (!connectionString) throw new Error("DATABASE_URL is empty");
+    pgPool = new Pool({
+      connectionString,
+      // Railway Postgres usually requires SSL in production.
+      ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
+    });
+  }
+  return pgPool;
+}
 
 function readDisk(): FileStore {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -101,15 +121,67 @@ function getStore(): FileStore {
 }
 
 /** Вызвать при старте сервера (создаёт папку data при необходимости). */
-export function initStore() {
+async function initPostgres() {
+  const pool = getPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      week_monday TEXT NOT NULL,
+      day_index INTEGER NOT NULL,
+      day_span INTEGER NOT NULL,
+      start_minutes INTEGER NOT NULL,
+      duration_minutes INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      comment TEXT NOT NULL,
+      confirmation_required BOOLEAN NOT NULL DEFAULT FALSE,
+      confirmed_at TEXT NULL,
+      confirmed_by_tg_id BIGINT NULL,
+      declined_at TEXT NULL,
+      declined_by_tg_id BIGINT NULL,
+      call_clicked_at TEXT NULL,
+      call_clicked_by_tg_id BIGINT NULL,
+      confirmation_message_chat_id BIGINT NULL,
+      confirmation_message_id BIGINT NULL,
+      owner_tg_id BIGINT NOT NULL,
+      owner_name TEXT NOT NULL,
+      card_color TEXT NOT NULL DEFAULT 'slate',
+      remind_at TEXT NULL,
+      reminder_sent INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+}
+
+export async function initStore() {
+  usePostgres = wantPostgres();
+  if (usePostgres) {
+    await initPostgres();
+    return;
+  }
   getStore();
 }
 
-export function getEvent(id: string): EventRow | null {
+export async function getEvent(id: string): Promise<EventRow | null> {
+  if (usePostgres) {
+    const { rows } = await getPool().query<EventRow>("SELECT * FROM events WHERE id = $1 LIMIT 1", [id]);
+    return rows[0] ?? null;
+  }
   return getStore().events.find((e) => e.id === id) ?? null;
 }
 
-export function listEventsForWeek(weekMonday: string): EventRow[] {
+export async function listEventsForWeek(weekMonday: string): Promise<EventRow[]> {
+  if (usePostgres) {
+    const { rows } = await getPool().query<EventRow>(
+      `
+        SELECT *
+        FROM events
+        WHERE week_monday = $1
+          AND declined_at IS NULL
+        ORDER BY day_index, start_minutes
+      `,
+      [weekMonday],
+    );
+    return rows;
+  }
   return getStore()
     .events.filter((e) => {
       if (e.week_monday !== weekMonday) return false;
@@ -119,7 +191,49 @@ export function listEventsForWeek(weekMonday: string): EventRow[] {
     .sort((a, b) => a.day_index - b.day_index || a.start_minutes - b.start_minutes);
 }
 
-export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_sent?: number }) {
+export async function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_sent?: number }) {
+  if (usePostgres) {
+    await getPool().query(
+      `
+        INSERT INTO events (
+          id, week_monday, day_index, day_span, start_minutes, duration_minutes, title, comment,
+          confirmation_required, confirmed_at, confirmed_by_tg_id, declined_at, declined_by_tg_id,
+          call_clicked_at, call_clicked_by_tg_id, confirmation_message_chat_id, confirmation_message_id,
+          owner_tg_id, owner_name, card_color, remind_at, reminder_sent
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8,
+          $9, $10, $11, $12, $13,
+          $14, $15, $16, $17,
+          $18, $19, $20, $21, $22
+        )
+      `,
+      [
+        row.id,
+        row.week_monday,
+        row.day_index,
+        row.day_span,
+        row.start_minutes,
+        row.duration_minutes,
+        row.title,
+        row.comment,
+        row.confirmation_required ?? false,
+        row.confirmed_at ?? null,
+        row.confirmed_by_tg_id ?? null,
+        row.declined_at ?? null,
+        row.declined_by_tg_id ?? null,
+        row.call_clicked_at ?? null,
+        row.call_clicked_by_tg_id ?? null,
+        row.confirmation_message_chat_id ?? null,
+        row.confirmation_message_id ?? null,
+        row.owner_tg_id,
+        row.owner_name.trim() || `Пользователь ${row.owner_tg_id}`,
+        row.card_color?.trim() || "slate",
+        row.remind_at ?? null,
+        row.reminder_sent ?? 0,
+      ],
+    );
+    return;
+  }
   const s = getStore();
   s.events.push({
     ...row,
@@ -140,7 +254,7 @@ export function insertEvent(row: Omit<EventRow, "reminder_sent"> & { reminder_se
   writeDisk(s);
 }
 
-export function updateEvent(
+export async function updateEvent(
   id: string,
   patch: Partial<
     Pick<
@@ -166,6 +280,15 @@ export function updateEvent(
     >
   >,
 ) {
+  if (usePostgres) {
+    const entries = Object.entries(patch).filter(([, v]) => v !== undefined);
+    if (!entries.length) return;
+    const setSql = entries.map(([k], i) => `${k} = $${i + 1}`).join(", ");
+    const values = entries.map(([, v]) => v);
+    values.push(id);
+    await getPool().query(`UPDATE events SET ${setSql} WHERE id = $${values.length}`, values);
+    return;
+  }
   const s = getStore();
   const ev = s.events.find((e) => e.id === id);
   if (!ev) return;
@@ -190,13 +313,31 @@ export function updateEvent(
   writeDisk(s);
 }
 
-export function deleteEvent(id: string) {
+export async function deleteEvent(id: string) {
+  if (usePostgres) {
+    await getPool().query("DELETE FROM events WHERE id = $1", [id]);
+    return;
+  }
   const s = getStore();
   s.events = s.events.filter((e) => e.id !== id);
   writeDisk(s);
 }
 
-export function dueReminders(nowIso: string): EventRow[] {
+export async function dueReminders(nowIso: string): Promise<EventRow[]> {
+  if (usePostgres) {
+    const { rows } = await getPool().query<EventRow>(
+      `
+        SELECT *
+        FROM events
+        WHERE reminder_sent = 0
+          AND remind_at IS NOT NULL
+          AND remind_at <> ''
+          AND remind_at <= $1
+      `,
+      [nowIso],
+    );
+    return rows;
+  }
   return getStore().events.filter(
     (e) => e.reminder_sent === 0 && e.remind_at != null && e.remind_at !== "" && e.remind_at <= nowIso,
   );
