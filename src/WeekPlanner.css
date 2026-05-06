@@ -529,7 +529,7 @@
   height: 2.15rem;
   padding: 0;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, #1a1d24 55%, var(--wp-line));
+  border: 1px solid color-mix(in srgb, #0f172a 28%, #64748b);
   background: radial-gradient(circle at 32% 22%, #3d4555 0%, #121418 58%, #0a0b0d 100%);
   cursor: pointer;
   box-shadow:
@@ -562,6 +562,63 @@
   object-fit: contain;
   display: block;
   pointer-events: none;
+}
+
+/* Обводка шестерёнки = как у карточки этого цвета */
+.wp-gear.card-c-slate {
+  border-color: color-mix(in srgb, #0f172a 28%, #64748b);
+}
+
+.wp-gear.card-c-sky {
+  border-color: color-mix(in srgb, #0c4a6e 35%, #0284c7);
+}
+
+.wp-gear.card-c-violet {
+  border-color: color-mix(in srgb, #1e1b4b 32%, #7c3aed);
+}
+
+.wp-gear.card-c-rose {
+  border-color: color-mix(in srgb, #4c0519 28%, #e11d48);
+}
+
+.wp-gear.card-c-amber {
+  border-color: color-mix(in srgb, #78350f 22%, #f59e0b);
+}
+
+.wp-gear.card-c-teal {
+  border-color: color-mix(in srgb, #042f2e 30%, #0d9488);
+}
+
+.wp-gear.card-c-coral {
+  border-color: color-mix(in srgb, #431407 26%, #ea580c);
+}
+
+.wp.theme-dark .wp-gear.card-c-slate {
+  border-color: #334155;
+}
+
+.wp.theme-dark .wp-gear.card-c-sky {
+  border-color: #0c4a6e;
+}
+
+.wp.theme-dark .wp-gear.card-c-violet {
+  border-color: #4c1d95;
+}
+
+.wp.theme-dark .wp-gear.card-c-rose {
+  border-color: #881337;
+}
+
+.wp.theme-dark .wp-gear.card-c-amber {
+  border-color: #b45309;
+}
+
+.wp.theme-dark .wp-gear.card-c-teal {
+  border-color: #115e59;
+}
+
+.wp.theme-dark .wp-gear.card-c-coral {
+  border-color: #7c2d12;
 }
 
 .wp-info-time,

@@ -844,7 +844,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             <div className="wp-info-title">{bubbleEvent.title}</div>
             <button
               type="button"
-              className="wp-gear"
+              className={`wp-gear card-c-${normalizeCardColor(bubbleEvent.card_color)}`}
               aria-label="Открыть изменение дела"
               onClick={() => openEditorForEvent(bubbleEvent)}
             >
