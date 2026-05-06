@@ -87,12 +87,14 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
     `Комментарий: ${comment}\n` +
     `Добавил: ${creator.name}\n\n` +
     `Если есть вопросы — позвоните и обсудите дело:\n${phone}`;
+  const delivered: { chat_id: number; message_id: number }[] = [];
   for (const uid of ALLOWED) {
     if (uid === creator.id) continue;
     try {
       const message = await botForNotify.telegram.sendMessage(uid, text, {
         reply_markup: confirmationKeyboard(eventId),
       });
+      delivered.push({ chat_id: message.chat.id, message_id: message.message_id });
       await db.updateEvent(eventId, {
         confirmation_message_chat_id: message.chat.id,
         confirmation_message_id: message.message_id,
@@ -100,6 +102,11 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
     } catch (e) {
       console.error("Запрос подтверждения не дошёл до", uid, e);
     }
+  }
+  if (delivered.length > 0) {
+    await db.updateEvent(eventId, {
+      confirmation_messages_json: JSON.stringify(delivered),
+    });
   }
 }
 
@@ -256,6 +263,7 @@ app.post("/api/events", async (req, res) => {
     call_clicked_by_tg_id: null,
     confirmation_message_chat_id: null,
     confirmation_message_id: null,
+    confirmation_messages_json: null,
     owner_tg_id: user.id,
     owner_name: user.name,
     remind_at: b.remind_at && b.remind_at.length > 0 ? b.remind_at : null,
@@ -354,6 +362,26 @@ app.delete("/api/events/:id", async (req, res) => {
   const event = await db.getEvent(id);
   if (!event) return res.status(404).json({ error: "not_found" });
   if (event.owner_tg_id !== user.id) return res.status(403).json({ error: "owner_only" });
+
+  // Если автор удалил дело, удаляем и сообщения подтверждения у получателей.
+  if (botForNotify && event.confirmation_messages_json) {
+    try {
+      const refs = JSON.parse(event.confirmation_messages_json) as Array<{ chat_id?: number; message_id?: number }>;
+      for (const ref of refs) {
+        const chatId = Number(ref.chat_id);
+        const msgId = Number(ref.message_id);
+        if (!Number.isFinite(chatId) || !Number.isFinite(msgId)) continue;
+        try {
+          await botForNotify.telegram.deleteMessage(chatId, msgId);
+        } catch {
+          // Сообщение могло быть уже удалено/изменено пользователем; это не блокирует удаление дела.
+        }
+      }
+    } catch {
+      // Некорректный JSON — просто пропускаем удаление сообщений.
+    }
+  }
+
   await db.deleteEvent(id);
   return res.json({ ok: true });
 });
