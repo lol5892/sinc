@@ -62,6 +62,63 @@ function confirmationKeyboard(eventId: string) {
   };
 }
 
+type MsgRef = { chat_id: number; message_id: number };
+
+function parseMessageRefs(raw: string | null | undefined): MsgRef[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as Array<{ chat_id?: number; message_id?: number }>;
+    const out: MsgRef[] = [];
+    for (const x of arr) {
+      const chatId = Number(x.chat_id);
+      const msgId = Number(x.message_id);
+      if (Number.isFinite(chatId) && Number.isFinite(msgId)) out.push({ chat_id: chatId, message_id: msgId });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function deleteMessageRefs(refs: MsgRef[]) {
+  if (!botForNotify) return { ok: 0, failed: 0 };
+  let ok = 0;
+  let failed = 0;
+  for (const ref of refs) {
+    try {
+      await botForNotify.telegram.deleteMessage(ref.chat_id, ref.message_id);
+      ok += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { ok, failed };
+}
+
+/** Оставляем в чате только сообщения по подтверждённым и существующим делам. */
+async function cleanupBotMessagesToConfirmedOnly() {
+  const events = await db.listAllEvents();
+  let deleted = 0;
+  let failed = 0;
+  let touchedEvents = 0;
+  for (const ev of events) {
+    const refs = parseMessageRefs(ev.confirmation_messages_json);
+    if (!refs.length) continue;
+    const shouldKeep = Boolean(ev.confirmed_at);
+    if (shouldKeep) continue;
+    const r = await deleteMessageRefs(refs);
+    deleted += r.ok;
+    failed += r.failed;
+    touchedEvents += 1;
+    await db.updateEvent(ev.id, {
+      confirmation_message_chat_id: null,
+      confirmation_message_id: null,
+      confirmation_messages_json: null,
+    });
+  }
+  return { deleted, failed, touchedEvents };
+}
+
 async function notifyOthersInFamily(creatorId: number, text: string) {
   if (!botForNotify || ALLOWED.size < 2) return;
   for (const uid of ALLOWED) {
@@ -365,21 +422,8 @@ app.delete("/api/events/:id", async (req, res) => {
 
   // Если автор удалил дело, удаляем и сообщения подтверждения у получателей.
   if (botForNotify && event.confirmation_messages_json) {
-    try {
-      const refs = JSON.parse(event.confirmation_messages_json) as Array<{ chat_id?: number; message_id?: number }>;
-      for (const ref of refs) {
-        const chatId = Number(ref.chat_id);
-        const msgId = Number(ref.message_id);
-        if (!Number.isFinite(chatId) || !Number.isFinite(msgId)) continue;
-        try {
-          await botForNotify.telegram.deleteMessage(chatId, msgId);
-        } catch {
-          // Сообщение могло быть уже удалено/изменено пользователем; это не блокирует удаление дела.
-        }
-      }
-    } catch {
-      // Некорректный JSON — просто пропускаем удаление сообщений.
-    }
+    const refs = parseMessageRefs(event.confirmation_messages_json);
+    await deleteMessageRefs(refs);
   }
 
   await db.deleteEvent(id);
@@ -444,6 +488,18 @@ async function main() {
     };
 
     bot.command("myid", replyMyId);
+
+    bot.command("cleanup", async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
+        await ctx.reply("Нет доступа.");
+        return;
+      }
+      const r = await cleanupBotMessagesToConfirmedOnly();
+      await ctx.reply(
+        `Чистка завершена.\nУдалено сообщений: ${r.deleted}\nОшибок удаления: ${r.failed}\nПроверено дел: ${r.touchedEvents}`,
+      );
+    });
 
     bot.action(/^confirm:(.+)$/, async (ctx) => {
       const userId = ctx.from?.id;
