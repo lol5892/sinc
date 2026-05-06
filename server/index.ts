@@ -80,7 +80,13 @@ async function requestConfirmationFromOthers(creator: AuthUser, eventId: string,
   if (!event) return;
   const comment = event.comment?.trim() ? event.comment.trim() : "без комментария";
   const phone = phoneForUserName(event.owner_name);
-  const text = `Нужно подтверждение дела:\nНазвание: ${title}\nВремя: ${when}\nКомментарий: ${comment}\nДобавил: ${creator.name}\nТелефон: ${phone}`;
+  const text =
+    `Нужно подтверждение дела:\n` +
+    `Название: ${title}\n` +
+    `Время: ${when}\n` +
+    `Комментарий: ${comment}\n` +
+    `Добавил: ${creator.name}\n\n` +
+    `Если есть вопросы — позвоните и обсудите дело:\n${phone}`;
   for (const uid of ALLOWED) {
     if (uid === creator.id) continue;
     try {
