@@ -133,6 +133,13 @@ function durationFromTimes(startM: number, endM: number): number {
 const MIN_CREATE_LEAD_HOURS = 10;
 const MIN_CREATE_LEAD_MS = MIN_CREATE_LEAD_HOURS * 60 * 60 * 1000;
 
+function eventStartAtLocal(weekMonday: string, dayIndex: number, startMinutes: number): Date {
+  const d = new Date(`${weekMonday}T00:00:00`);
+  d.setDate(d.getDate() + dayIndex);
+  d.setMinutes(d.getMinutes() + startMinutes);
+  return d;
+}
+
 function normalizeToGrid(ev: ApiEvent): ApiEvent {
   const start = clamp(snapMin(ev.start_minutes), 0, 24 * 60 - SNAP);
   const dur = clamp(Math.round(ev.duration_minutes / SNAP) * SNAP, SNAP, 24 * 60 - start);
@@ -154,6 +161,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [theme, setTheme] = useState<ThemeMode>(() => hourTheme());
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [interaction, setInteraction] = useState<Interaction | null>(null);
   const [preview, setPreview] = useState<PreviewPatch | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -173,7 +181,10 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
   );
 
   useEffect(() => {
-    const id = window.setInterval(() => setTheme(hourTheme()), 60_000);
+    const id = window.setInterval(() => {
+      setTheme(hourTheme());
+      setNowMs(Date.now());
+    }, 60_000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -208,6 +219,18 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       return { label, date, isToday: ymdLocal(date) === todayStr };
     });
   }, [monday]);
+
+  const blockedMinutesByDay = useMemo(() => {
+    const cutoff = new Date(nowMs + MIN_CREATE_LEAD_MS);
+    const cutoffDateIso = ymdLocal(cutoff);
+    const cutoffMinutes = cutoff.getHours() * 60 + cutoff.getMinutes();
+    return dayDates.map((d) => {
+      const dayIso = ymdLocal(d.date);
+      if (dayIso < cutoffDateIso) return 24 * 60;
+      if (dayIso > cutoffDateIso) return 0;
+      return clamp(cutoffMinutes, 0, 24 * 60);
+    });
+  }, [dayDates, nowMs]);
 
   const rows = useMemo(() => {
     const arr: ApiEvent[] = [];
@@ -373,6 +396,13 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
       setInteraction(null);
       setPreview(null);
       if (!p || p.id !== interaction.id) return;
+      const effectiveDay = p.day_index ?? interaction.day0;
+      const effectiveStart = p.start_minutes ?? interaction.start0;
+      const leadMs = eventStartAtLocal(monday, effectiveDay, effectiveStart).getTime() - Date.now();
+      if (leadMs < MIN_CREATE_LEAD_MS) {
+        setErr(`Нельзя поставить или перенести дело ближе чем за ${MIN_CREATE_LEAD_HOURS} часов до начала.`);
+        return;
+      }
       try {
         const patch =
           interaction.mode === "drag"
@@ -546,6 +576,12 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
 
           {dayDates.map((_, day) => (
             <div key={day} className="wp-day" style={{ height: DAY_H }} onPointerDown={(e) => onBackgroundTap(e, day)}>
+              {blockedMinutesByDay[day] > 0 && (
+                <div
+                  className="wp-forbidden-time"
+                  style={{ height: `${Math.round((blockedMinutesByDay[day] / (24 * 60)) * DAY_H)}px` }}
+                />
+              )}
               {Array.from({ length: 48 }, (_, i) => (
                 <div key={i} className={`wp-slotline ${i % 2 === 0 ? "major" : "minor"}`} style={{ top: i * SLOT_H }} />
               ))}

@@ -131,7 +131,13 @@
 }
 
 .wp-toast.err {
-  margin: 0.55rem 1rem 0;
+  position: fixed;
+  top: calc(0.65rem + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 140;
+  width: min(560px, calc(100vw - 1.4rem));
+  margin: 0;
   padding: 0.62rem 0.85rem;
   border-radius: 0.75rem;
   background: color-mix(in srgb, #7f1d1d 88%, var(--wp-panel));
@@ -250,6 +256,23 @@
   position: relative;
   border-left: 1px solid var(--wp-line);
   background: color-mix(in srgb, var(--wp-bg) 55%, var(--wp-panel));
+}
+
+.wp-forbidden-time {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, #ef4444 18%, transparent) 0,
+    color-mix(in srgb, #ef4444 18%, transparent) 8px,
+    color-mix(in srgb, #ef4444 7%, transparent) 8px,
+    color-mix(in srgb, #ef4444 7%, transparent) 16px
+  );
+  border-bottom: 1px solid color-mix(in srgb, #ef4444 45%, transparent);
 }
 
 .wp-slotline {

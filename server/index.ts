@@ -324,6 +324,19 @@ app.patch("/api/events/:id", async (req, res) => {
   if (patch.remind_at !== undefined) patch.reminder_sent = 0;
   if (typeof b.card_color === "string" && CARD_COLORS.has(b.card_color.trim())) patch.card_color = b.card_color.trim();
 
+  // Нельзя переносить дело так, чтобы старт был раньше, чем через 10 часов от текущего момента.
+  const effectiveDay = patch.day_index ?? event.day_index;
+  const effectiveStart = patch.start_minutes ?? event.start_minutes;
+  const effectiveStartAt = eventStartAt(event.week_monday, effectiveDay, effectiveStart);
+  if (!effectiveStartAt) return res.status(400).json({ error: "start_at" });
+  const diff = effectiveStartAt.getTime() - Date.now();
+  if (diff < MIN_CREATE_LEAD_MS) {
+    return res.status(400).json({
+      error: "min_lead_time_10h",
+      message: `Нельзя перенести дело ближе чем за ${MIN_CREATE_LEAD_HOURS} часов до начала.`,
+    });
+  }
+
   await db.updateEvent(id, patch);
   return res.json({ ok: true });
 });
