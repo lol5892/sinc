@@ -52,14 +52,21 @@ function normalizePhoneForEntity(display: string): string {
   return display.trim() || "+";
 }
 
-function confirmationKeyboard(eventId: string, mode: "initial" | "after-call" = "initial") {
-  const rows = [[{ text: "Подтвердить", callback_data: `confirm:${eventId}` }]];
-  rows.push(
-    mode === "initial"
-      ? [{ text: "Позвонить", callback_data: `call:${eventId}` }]
-      : [{ text: "Отказаться", callback_data: `decline:${eventId}` }],
-  );
-  return { inline_keyboard: rows };
+/** Вторая кнопка — `tel:` как ссылка на номер в чате (на iPhone открывает набор). */
+function confirmationKeyboard(eventId: string, ownerName: string) {
+  const display = phoneForUserName(ownerName);
+  const intl = normalizePhoneForEntity(display);
+  const telUrl = intl.startsWith("+") ? `tel:${intl}` : `tel:+${intl.replace(/^\++/, "")}`;
+  const label = intl.length <= 64 ? intl : `${intl.slice(0, 61)}…`;
+  return {
+    inline_keyboard: [
+      [
+        { text: "Подтвердить", callback_data: `confirm:${eventId}` },
+        { text: label, url: telUrl },
+      ],
+      [{ text: "Отказаться", callback_data: `decline:${eventId}` }],
+    ],
+  };
 }
 
 async function notifyOthersInFamily(creatorId: number, text: string) {
@@ -77,13 +84,14 @@ async function notifyOthersInFamily(creatorId: number, text: string) {
 async function requestConfirmationFromOthers(creator: AuthUser, eventId: string, title: string, when: string) {
   if (!botForNotify || ALLOWED.size < 2) return;
   const event = db.getEvent(eventId);
-  const comment = event?.comment?.trim() ? event.comment.trim() : "без комментария";
+  if (!event) return;
+  const comment = event.comment?.trim() ? event.comment.trim() : "без комментария";
   const text = `Нужно подтверждение дела:\nНазвание: ${title}\nВремя: ${when}\nКомментарий: ${comment}\nДобавил: ${creator.name}`;
   for (const uid of ALLOWED) {
     if (uid === creator.id) continue;
     try {
       const message = await botForNotify.telegram.sendMessage(uid, text, {
-        reply_markup: confirmationKeyboard(eventId),
+        reply_markup: confirmationKeyboard(eventId, event.owner_name),
       });
       db.updateEvent(eventId, {
         confirmation_message_chat_id: message.chat.id,
@@ -351,36 +359,6 @@ async function main() {
     };
 
     bot.command("myid", replyMyId);
-
-    bot.action(/^call:(.+)$/, async (ctx) => {
-      const userId = ctx.from?.id;
-      if (!userId || (ALLOWED.size && !ALLOWED.has(userId))) {
-        await ctx.answerCbQuery("Нет доступа").catch(() => {});
-        return;
-      }
-      const eventId = ctx.match[1];
-      const event = db.getEvent(eventId);
-      if (!event) {
-        await ctx.answerCbQuery("Дело не найдено").catch(() => {});
-        return;
-      }
-      const now = new Date().toISOString();
-      db.updateEvent(event.id, {
-        call_clicked_at: now,
-        call_clicked_by_tg_id: userId,
-      });
-      await ctx
-        .editMessageReplyMarkup(confirmationKeyboard(event.id, "after-call"))
-        .catch((e) => console.error("Не удалось заменить кнопки после звонка", e));
-      const phoneDisplay = phoneForUserName(event.owner_name);
-      const phoneEntity = normalizePhoneForEntity(phoneDisplay);
-      const prefix = "Позвонить автору:\n";
-      const text = prefix + phoneEntity;
-      await ctx.reply(text, {
-        entities: [{ type: "phone_number", offset: prefix.length, length: phoneEntity.length }],
-      });
-      await ctx.answerCbQuery("Показываю номер автора").catch(() => {});
-    });
 
     bot.action(/^confirm:(.+)$/, async (ctx) => {
       const userId = ctx.from?.id;
