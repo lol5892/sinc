@@ -46,6 +46,47 @@ let mem: FileStore | null = null;
 let pgPool: Pool | null = null;
 let usePostgres = false;
 
+function asNum(v: unknown, fallback = 0): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+function normalizeDbRow(row: EventRow): EventRow {
+  return {
+    ...row,
+    day_index: asNum((row as unknown as Record<string, unknown>).day_index, 0),
+    day_span: asNum((row as unknown as Record<string, unknown>).day_span, 1),
+    start_minutes: asNum((row as unknown as Record<string, unknown>).start_minutes, 0),
+    duration_minutes: asNum((row as unknown as Record<string, unknown>).duration_minutes, 60),
+    confirmed_by_tg_id:
+      (row as unknown as Record<string, unknown>).confirmed_by_tg_id == null
+        ? null
+        : asNum((row as unknown as Record<string, unknown>).confirmed_by_tg_id),
+    declined_by_tg_id:
+      (row as unknown as Record<string, unknown>).declined_by_tg_id == null
+        ? null
+        : asNum((row as unknown as Record<string, unknown>).declined_by_tg_id),
+    call_clicked_by_tg_id:
+      (row as unknown as Record<string, unknown>).call_clicked_by_tg_id == null
+        ? null
+        : asNum((row as unknown as Record<string, unknown>).call_clicked_by_tg_id),
+    confirmation_message_chat_id:
+      (row as unknown as Record<string, unknown>).confirmation_message_chat_id == null
+        ? null
+        : asNum((row as unknown as Record<string, unknown>).confirmation_message_chat_id),
+    confirmation_message_id:
+      (row as unknown as Record<string, unknown>).confirmation_message_id == null
+        ? null
+        : asNum((row as unknown as Record<string, unknown>).confirmation_message_id),
+    owner_tg_id: asNum((row as unknown as Record<string, unknown>).owner_tg_id, 0),
+    reminder_sent: asNum((row as unknown as Record<string, unknown>).reminder_sent, 0),
+  };
+}
+
 function wantPostgres(): boolean {
   return Boolean((process.env.DATABASE_URL ?? "").trim());
 }
@@ -170,7 +211,7 @@ export async function initStore() {
 export async function getEvent(id: string): Promise<EventRow | null> {
   if (usePostgres) {
     const { rows } = await getPool().query<EventRow>("SELECT * FROM events WHERE id = $1 LIMIT 1", [id]);
-    return rows[0] ?? null;
+    return rows[0] ? normalizeDbRow(rows[0]) : null;
   }
   return getStore().events.find((e) => e.id === id) ?? null;
 }
@@ -187,7 +228,7 @@ export async function listEventsForWeek(weekMonday: string): Promise<EventRow[]>
       `,
       [weekMonday],
     );
-    return rows;
+    return rows.map(normalizeDbRow);
   }
   return getStore()
     .events.filter((e) => {
@@ -343,7 +384,7 @@ export async function dueReminders(nowIso: string): Promise<EventRow[]> {
       `,
       [nowIso],
     );
-    return rows;
+    return rows.map(normalizeDbRow);
   }
   return getStore().events.filter(
     (e) => e.reminder_sent === 0 && e.remind_at != null && e.remind_at !== "" && e.remind_at <= nowIso,
@@ -353,7 +394,7 @@ export async function dueReminders(nowIso: string): Promise<EventRow[]> {
 export async function listAllEvents(): Promise<EventRow[]> {
   if (usePostgres) {
     const { rows } = await getPool().query<EventRow>("SELECT * FROM events ORDER BY week_monday, day_index, start_minutes");
-    return rows;
+    return rows.map(normalizeDbRow);
   }
   return [...getStore().events].sort((a, b) =>
     a.week_monday.localeCompare(b.week_monday) || a.day_index - b.day_index || a.start_minutes - b.start_minutes,

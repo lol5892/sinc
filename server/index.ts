@@ -263,8 +263,7 @@ app.post("/api/events", async (req, res) => {
   const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   const hh = String(Math.floor(b.start_minutes / 60)).padStart(2, "0");
   const mm = String(b.start_minutes % 60).padStart(2, "0");
-  const msg = `Новое дело в общем плане:\n«${titleTrim}»\n${WD[b.day_index]}, ${hh}:${mm}`;
-  void notifyOthersInFamily(user.id, msg);
+  // Одно объединённое сообщение: и уведомление о новом деле, и блок подтверждения.
   void requestConfirmationFromOthers(user, id, titleTrim, `${WD[b.day_index]}, ${hh}:${mm}`);
   return res.json({ id });
 });
