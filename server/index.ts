@@ -9,6 +9,8 @@ import dotenv from "dotenv";
 import { parseAndValidateInitData } from "./auth.js";
 import * as db from "./db.js";
 
+process.env.TZ = process.env.TZ || "Europe/Moscow";
+
 dotenv.config();
 
 const BOT_TOKEN = process.env.BOT_TOKEN ?? "";
@@ -16,6 +18,7 @@ const WEB_APP_URL = (process.env.WEB_APP_URL ?? "").replace(/\/$/, "");
 const PORT_RAW = Number(process.env.PORT);
 const PORT = Number.isInteger(PORT_RAW) && PORT_RAW > 0 && PORT_RAW <= 65535 ? PORT_RAW : 3001;
 const NODE_ENV = process.env.NODE_ENV ?? "development";
+const MOSCOW_TZ = "Europe/Moscow";
 const ALLOWED = new Set(
   (process.env.TELEGRAM_ALLOWED_IDS ?? "")
     .split(",")
@@ -72,7 +75,7 @@ function donePromptText(event: Awaited<ReturnType<typeof db.getEvent>>, endAt: D
   if (!event) return "Дело не найдено";
   const hh = String(Math.floor(event.start_minutes / 60)).padStart(2, "0");
   const mm = String(event.start_minutes % 60).padStart(2, "0");
-  const endStr = endAt.toLocaleString("ru-RU");
+  const endStr = endAt.toLocaleString("ru-RU", { timeZone: MOSCOW_TZ });
   return (
     `Пора закрыть дело ✨\n` +
     `Название: ${event.title}\n` +
@@ -684,7 +687,7 @@ async function main() {
         completed_by_tg_id: userId,
       });
       await ctx.answerCbQuery("Дело завершено").catch(() => {});
-      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Выполнено (${new Date(nowIso).toLocaleString("ru-RU")})`;
+      const text = `${ctx.callbackQuery.message && "text" in ctx.callbackQuery.message ? ctx.callbackQuery.message.text : ""}\n\n✅ Выполнено (${new Date(nowIso).toLocaleString("ru-RU", { timeZone: MOSCOW_TZ })})`;
       await ctx.editMessageText(text).catch(() => {});
     });
 

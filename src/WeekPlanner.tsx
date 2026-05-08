@@ -9,6 +9,7 @@ const SLOT_H = HOUR_H / 2;
 const DAY_H = 24 * HOUR_H;
 const TIME_W = 58;
 const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const MOSCOW_TZ = "Europe/Moscow";
 
 const CARD_PALETTE = [
   { id: "slate", label: "Серый" },
@@ -95,6 +96,14 @@ function fmtClock(m: number): string {
   const h = Math.floor(m / 60);
   const mm = m % 60;
   return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+function fmtDateRu(d: Date, opts: Intl.DateTimeFormatOptions): string {
+  return d.toLocaleDateString("ru-RU", { ...opts, timeZone: MOSCOW_TZ });
+}
+
+function fmtDateTimeRu(d: Date, opts?: Intl.DateTimeFormatOptions): string {
+  return d.toLocaleString("ru-RU", { ...(opts ?? {}), timeZone: MOSCOW_TZ });
 }
 
 function hourTheme(): ThemeMode {
@@ -299,7 +308,9 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
     if (ev.target !== ev.currentTarget) return;
     const rect = (ev.currentTarget as HTMLDivElement).getBoundingClientRect();
     const y = ev.clientY - rect.top;
-    const min = clamp(snapMin((y / DAY_H) * 24 * 60), 0, 24 * 60 - SNAP);
+    const rawMin = clamp((y / DAY_H) * 24 * 60, 0, 24 * 60 - 1);
+    const hourStart = Math.floor(rawMin / 60) * 60;
+    const min = clamp(hourStart, 0, 23 * 60);
     const now = Date.now();
     const last = lastTapRef.current;
     const isDouble = !!last && last.day === day && Math.abs(last.min - min) <= SNAP && now - last.t < 340;
@@ -567,8 +578,8 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             ‹
           </button>
           <span className="wp-range-chip">
-            {dayDates[0].date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} —{" "}
-            {dayDates[6].date.toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" })}
+            {fmtDateRu(dayDates[0].date, { day: "numeric", month: "short" })} —{" "}
+            {fmtDateRu(dayDates[6].date, { day: "numeric", month: "short", year: "numeric" })}
           </span>
           <button type="button" className="wp-btn wp-icon-btn ghost" aria-label="Следующая неделя" onClick={() => shiftWeek(1)}>
             ›
@@ -585,7 +596,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
           {dayDates.map((d, i) => (
             <div key={i} className={`wp-dhead glass-soft${d.isToday ? " wp-dhead-today" : ""}`}>
               <span className="wp-dn">{d.label}</span>
-              <span className="wp-dd">{d.date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>
+              <span className="wp-dd">{fmtDateRu(d.date, { day: "numeric", month: "short" })}</span>
             </div>
           ))}
 
@@ -646,7 +657,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
                     </div>
                     {e.completed_at && (
                       <div className="wp-block-done">
-                        ✅ Завершено {new Date(e.completed_at).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                        ✅ Завершено {fmtDateTimeRu(new Date(e.completed_at), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
                       </div>
                     )}
                   </div>
@@ -851,7 +862,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
             {editor.readonlyDetails && editor.day_span > 1 && (
               <p className="wp-modal-note">
                 Несколько дней: до{" "}
-                {addDays(monday, editor.day_index + editor.day_span - 1).toLocaleDateString("ru-RU", {
+                {fmtDateRu(addDays(monday, editor.day_index + editor.day_span - 1), {
                   day: "numeric",
                   month: "long",
                 })}
@@ -927,7 +938,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
           </div>
           <div className="wp-info-time">
             {bubbleEvent.day_span > 1
-              ? `${addDays(monday, bubbleEvent.day_index).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} — ${addDays(monday, bubbleEvent.day_index + bubbleEvent.day_span - 1).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })} · `
+              ? `${fmtDateRu(addDays(monday, bubbleEvent.day_index), { day: "numeric", month: "short" })} — ${fmtDateRu(addDays(monday, bubbleEvent.day_index + bubbleEvent.day_span - 1), { day: "numeric", month: "short" })} · `
               : `${WD[bubbleEvent.day_index]} · `}
             {fmtClock(bubbleEvent.start_minutes)} — {fmtClock(bubbleEvent.start_minutes + bubbleEvent.duration_minutes)}
           </div>
@@ -937,7 +948,7 @@ export default function WeekPlanner({ initData, devUserId, devUserName, myTgId }
               {bubbleEvent.confirmed_at ? "Подтверждено" : "Ждёт подтверждения"}
             </div>
           )}
-          {bubbleEvent.completed_at && <div className="wp-confirm-status done">Завершено: {new Date(bubbleEvent.completed_at).toLocaleString("ru-RU")}</div>}
+          {bubbleEvent.completed_at && <div className="wp-confirm-status done">Завершено: {fmtDateTimeRu(new Date(bubbleEvent.completed_at))}</div>}
           {!bubbleEvent.completed_at &&
             bubbleEvent.confirmed_at &&
             bubbleEvent.completion_requested_at &&
